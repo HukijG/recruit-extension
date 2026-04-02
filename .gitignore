@@ -1,0 +1,8 @@
+node_modules
+.plasmo
+build
+
+# Reference/debug files
+export.csv
+*.html
+rf-candidate-added-information.json

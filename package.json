@@ -1,0 +1,42 @@
+{
+  "name": "recruit-extension",
+  "displayName": "LinkedIn Recruiter Scraper",
+  "version": "0.1.0",
+  "description": "Scrapes candidate data from LinkedIn Recruiter pipeline and sends to middleware",
+  "author": "Joel Haines",
+  "scripts": {
+    "dev": "plasmo dev",
+    "build": "plasmo build",
+    "package": "plasmo package"
+  },
+  "dependencies": {
+    "@plasmohq/messaging": "^0.7.2",
+    "@plasmohq/storage": "^1.15.0",
+    "papaparse": "^5.5.3",
+    "plasmo": "0.90.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@plasmohq/prettier-plugin-sort-imports": "4.0.1",
+    "@types/chrome": "^0.0.287",
+    "@types/papaparse": "^5.5.2",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "prettier": "3.3.3",
+    "typescript": "^5.7.2"
+  },
+  "manifest": {
+    "permissions": [
+      "activeTab",
+      "tabs",
+      "scripting",
+      "sidePanel",
+      "storage"
+    ],
+    "host_permissions": [
+      "https://www.linkedin.com/talent/*",
+      "<all_urls>"
+    ]
+  }
+}
