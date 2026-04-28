@@ -107,6 +107,10 @@ function countPopulatedRows(): number {
 async function scrollToLoadAllProfiles(
   targetCount: number
 ): Promise<ScrollToBottomResponse> {
+  // Sync jump to top so the scroll-down loop always covers the whole list
+  // regardless of where the user (or LinkedIn's pagination) left the scroll.
+  window.scrollTo(0, 0)
+
   const rows = document.querySelectorAll(
     "li[data-test-paginated-profile-list-item-container]"
   )
@@ -118,46 +122,54 @@ async function scrollToLoadAllProfiles(
 
   const SCROLL_STEP = window.innerHeight * 0.8
   const SCROLL_DELAY_MS = 300
-  const MAX_SCROLLS = 50 // safety cap
+  const MAX_SCROLLS = 50
+  const STALL_LIMIT = 3
 
   // Never try to populate more rows than actually exist in the DOM
   const effectiveTarget = Math.min(targetCount, rows.length)
 
-  const alreadyPopulated = countPopulatedRows()
   console.log(
     LOG_PREFIX,
     "scrollToLoadAllProfiles: Starting.",
     "Total shells:", rows.length,
     "Requested target:", targetCount,
     "Effective target:", effectiveTarget,
-    "Currently populated:", alreadyPopulated
+    "Initial populated:", countPopulatedRows()
   )
 
-  if (alreadyPopulated >= effectiveTarget) {
-    console.log(LOG_PREFIX, "scrollToLoadAllProfiles: Already have enough populated rows, skipping scroll")
-  } else {
-    let stalls = 0
-    let lastPopulated = alreadyPopulated
+  // Always run the loop — it exits at iter 0 if everything's already populated.
+  // The prior "skip if alreadyPopulated >= target" shortcut would falsely fire
+  // after pagination when LinkedIn left stale content in the DOM, scraping the
+  // old page's data; running through the loop costs nothing in the happy case.
+  // lastPopulated init -1 so the first measurement isn't counted as a stall.
+  let stalls = 0
+  let lastPopulated = -1
 
-    for (let i = 0; i < MAX_SCROLLS; i++) {
-      const populated = countPopulatedRows()
-      if (populated >= effectiveTarget) break
+  for (let i = 0; i < MAX_SCROLLS; i++) {
+    const populated = countPopulatedRows()
+    if (populated >= effectiveTarget) break
 
-      // Detect if we've stopped making progress (hit bottom of page)
-      if (populated === lastPopulated) {
-        stalls++
-        if (stalls >= 3) {
-          console.log(LOG_PREFIX, "scrollToLoadAllProfiles: Stalled after", stalls, "scrolls with no new rows. Populated:", populated, "of", targetCount)
-          break
-        }
-      } else {
-        stalls = 0
-        lastPopulated = populated
+    if (populated === lastPopulated) {
+      stalls++
+      if (stalls >= STALL_LIMIT) {
+        console.log(
+          LOG_PREFIX,
+          "scrollToLoadAllProfiles: Stalled after",
+          stalls,
+          "iterations with no new rows. Populated:",
+          populated,
+          "of",
+          effectiveTarget
+        )
+        break
       }
-
-      window.scrollBy({ top: SCROLL_STEP, behavior: "smooth" })
-      await sleep(SCROLL_DELAY_MS)
+    } else {
+      stalls = 0
+      lastPopulated = populated
     }
+
+    window.scrollBy({ top: SCROLL_STEP, behavior: "smooth" })
+    await sleep(SCROLL_DELAY_MS)
   }
 
   // Scroll back to top

@@ -443,14 +443,29 @@ function SidePanel() {
     }
   }, [pollPageInfo])
 
-  const handleScrape = useCallback(async () => {
-    console.log(LOG_PREFIX, "Scrape started")
-    setWorkflowState("scraping")
-    setScrapeStatus("Scrolling page to load all candidates...")
+  const resetTransientState = useCallback(() => {
     setScrapedCandidates([])
+    setScrapeStatus("")
     setMatchedCandidates([])
     setCsvError("")
     setCsvFileName("")
+    setCandidateResults([])
+    setSendProgress("")
+    setJobs([])
+    setRfIds([])
+    setSelectedJobId(null)
+    setJobAddResult("")
+    setShowJobModal(false)
+  }, [])
+
+  const handleScrape = useCallback(async () => {
+    console.log(LOG_PREFIX, "Scrape started — clearing transient state")
+    // Full reset of transient state so each scrape starts from the same baseline
+    // a fresh page+extension load gives us. middlewareUrl/extensionSecret are
+    // useStorage-backed and intentionally preserved.
+    resetTransientState()
+    setWorkflowState("scraping")
+    setScrapeStatus("Scrolling page to load all candidates...")
 
     // Fetch fresh page info right now instead of relying on potentially stale polled state
     let freshPageInfo: PageInfo | null = null
@@ -503,7 +518,7 @@ function SidePanel() {
       `Scraped ${scrapeResult.scrapedCount} candidate${scrapeResult.scrapedCount !== 1 ? "s" : ""}`
     )
     setWorkflowState("scraped")
-  }, [pageInfo])
+  }, [pageInfo, resetTransientState])
 
   const handleCsvFile = useCallback(
     (file: File) => {
@@ -640,27 +655,29 @@ function SidePanel() {
   }, [middlewareUrl, extensionSecret, selectedJobId, rfIds, jobs])
 
   const handleReset = useCallback(() => {
+    resetTransientState()
     setPageInfo(null)
-    setScrapedCandidates([])
-    setScrapeStatus("")
-    setMatchedCandidates([])
-    setCsvError("")
-    setCsvFileName("")
-    setCandidateResults([])
-    setSendProgress("")
-    setJobs([])
-    setRfIds([])
-    setSelectedJobId(null)
-    setJobAddResult("")
-    setShowJobModal(false)
     setWorkflowState("not_on_pipeline")
-  }, [])
+  }, [resetTransientState])
+
+  const showResetButton =
+    workflowState === "scraped" ||
+    workflowState === "csv_matched" ||
+    workflowState === "complete" ||
+    workflowState === "job_added"
 
   const checkedCount = matchedCandidates.filter((m) => m.checked).length
   const canSend = !!middlewareUrl?.trim() && checkedCount > 0
 
   return (
     <div style={styles.container}>
+      {showResetButton && (
+        <div style={styles.resetBar}>
+          <button onClick={handleReset} style={styles.resetButton} title="Clear all extension state and start over">
+            Reset
+          </button>
+        </div>
+      )}
       <StatusDisplay
         state={workflowState}
         pageInfo={pageInfo}
@@ -1794,6 +1811,22 @@ const styles: Record<string, React.CSSProperties> = {
     boxSizing: "border-box" as const,
     fontFamily: "monospace",
     outline: "none"
+  },
+  resetBar: {
+    width: "100%",
+    display: "flex",
+    justifyContent: "flex-end",
+    marginBottom: "-12px"
+  },
+  resetButton: {
+    background: "#fff",
+    border: "1px solid #e0e0e0",
+    borderRadius: "12px",
+    padding: "4px 12px",
+    fontSize: "11px",
+    fontWeight: 500,
+    color: "#888",
+    cursor: "pointer"
   }
 }
 
