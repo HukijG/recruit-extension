@@ -275,7 +275,6 @@ function buildPayload(m: MatchedCandidate): CandidatePayload {
 }
 
 async function sendCandidatesBatch(
-  middlewareUrl: string,
   candidates: CandidatePayload[],
   secret?: string
 ): Promise<{ ok: boolean; data?: SendCandidatesResponse; error?: string }> {
@@ -283,7 +282,7 @@ async function sendCandidatesBatch(
   try {
     const result = await sendToBackground({
       name: "sendCandidates",
-      body: { middlewareUrl, candidates, secret }
+      body: { candidates, secret }
     })
     return result ?? { ok: false, error: "No response from background" }
   } catch (err: any) {
@@ -294,7 +293,6 @@ async function sendCandidatesBatch(
 }
 
 async function addCandidatesToJob(
-  middlewareUrl: string,
   rfIds: number[],
   jobId: number,
   secret?: string
@@ -303,7 +301,7 @@ async function addCandidatesToJob(
   try {
     const result = await sendToBackground({
       name: "addToJob",
-      body: { middlewareUrl, rfIds, jobId, secret }
+      body: { rfIds, jobId, secret }
     })
     return result ?? { ok: false, error: "No response from background" }
   } catch (err: any) {
@@ -337,7 +335,6 @@ function SidePanel() {
   >([])
   const [csvError, setCsvError] = useState("")
   const [csvFileName, setCsvFileName] = useState("")
-  const [middlewareUrl, setMiddlewareUrl] = useStorage<string>("middlewareUrl", "")
   const [extensionSecret, setExtensionSecret] = useStorage<string>(
     { key: "extensionSecret", instance: localStore },
     ""
@@ -467,7 +464,7 @@ function SidePanel() {
   const handleScrape = useCallback(async () => {
     console.log(LOG_PREFIX, "Scrape started — clearing transient state")
     // Full reset of transient state so each scrape starts from the same baseline
-    // a fresh page+extension load gives us. middlewareUrl/extensionSecret are
+    // a fresh page+extension load gives us. extensionSecret is
     // useStorage-backed and intentionally preserved.
     resetTransientState()
     setWorkflowState("scraping")
@@ -577,12 +574,10 @@ function SidePanel() {
   }, [])
 
   const handleSend = useCallback(async () => {
-    if (!middlewareUrl?.trim()) return
-
     const toSend = matchedCandidates.filter((m) => m.checked)
     if (toSend.length === 0) return
 
-    console.log(LOG_PREFIX, `Sending batch of ${toSend.length} candidates to ${middlewareUrl}`)
+    console.log(LOG_PREFIX, `Sending batch of ${toSend.length} candidates`)
     setWorkflowState("sending")
     setCandidateResults([])
     setJobs([])
@@ -592,7 +587,7 @@ function SidePanel() {
     setSendProgress(`Sending ${toSend.length} candidates...`)
 
     const payloads = toSend.map(buildPayload)
-    const result = await sendCandidatesBatch(middlewareUrl, payloads, extensionSecret)
+    const result = await sendCandidatesBatch(payloads, extensionSecret)
 
     if (!result.ok || !result.data) {
       setSendProgress(`Failed — ${result.error}`)
@@ -620,17 +615,17 @@ function SidePanel() {
     if (data.errors) parts.push(`${data.errors} failed`)
     setSendProgress(parts.join(", ") || "0 processed")
     setWorkflowState("complete")
-  }, [matchedCandidates, middlewareUrl, extensionSecret])
+  }, [matchedCandidates, extensionSecret])
 
   const handleAddToJob = useCallback(async () => {
-    if (!middlewareUrl?.trim() || !selectedJobId || rfIds.length === 0) return
+    if (!selectedJobId || rfIds.length === 0) return
 
     const job = jobs.find((j) => j.id === selectedJobId)
     console.log(LOG_PREFIX, `Adding ${rfIds.length} candidates to job ${selectedJobId} (${job?.name})`)
     setWorkflowState("adding_to_job")
     setJobAddResult("")
 
-    const result = await addCandidatesToJob(middlewareUrl, rfIds, selectedJobId, extensionSecret)
+    const result = await addCandidatesToJob(rfIds, selectedJobId, extensionSecret)
 
     if (!result.ok || !result.data) {
       setJobAddResult(`Failed — ${result.error}`)
@@ -658,7 +653,7 @@ function SidePanel() {
     if (errors) parts.push(`${errors} failed`)
     setJobAddResult(parts.join(", ") || `0 added to ${jobName}`)
     setWorkflowState("job_added")
-  }, [middlewareUrl, extensionSecret, selectedJobId, rfIds, jobs])
+  }, [extensionSecret, selectedJobId, rfIds, jobs])
 
   const handleReset = useCallback(() => {
     resetTransientState()
@@ -673,7 +668,7 @@ function SidePanel() {
     workflowState === "job_added"
 
   const checkedCount = matchedCandidates.filter((m) => m.checked).length
-  const canSend = !!middlewareUrl?.trim() && checkedCount > 0
+  const canSend = checkedCount > 0
 
   return (
     <div style={styles.container}>
@@ -715,7 +710,7 @@ function SidePanel() {
 
       {workflowState === "csv_matched" && matchedCandidates.length > 0 && (
         <>
-          <MiddlewareUrlInput url={middlewareUrl} onUrlChange={setMiddlewareUrl} secret={extensionSecret} onSecretChange={setExtensionSecret} />
+          <AuthSecretInput secret={extensionSecret} onSecretChange={setExtensionSecret} />
           <ReviewTable
             matched={matchedCandidates}
             onToggle={toggleCandidate}
@@ -1092,30 +1087,18 @@ function ReviewTable({
   )
 }
 
-// --- Middleware URL Input ---
+// --- Auth Secret Input ---
 
-function MiddlewareUrlInput({
-  url,
-  onUrlChange,
+function AuthSecretInput({
   secret,
   onSecretChange
 }: {
-  url: string
-  onUrlChange: (url: string) => void
   secret: string
   onSecretChange: (secret: string) => void
 }) {
   return (
     <div style={{ width: "100%" }}>
-      <label style={styles.inputLabel}>Middleware URL</label>
-      <input
-        type="url"
-        value={url ?? ""}
-        onChange={(e) => onUrlChange(e.target.value)}
-        placeholder="https://your-worker.example.com"
-        style={styles.urlInput}
-      />
-      <label style={{ ...styles.inputLabel, marginTop: "8px" }}>Extension Secret</label>
+      <label style={styles.inputLabel}>Extension Secret</label>
       <div style={{ display: "flex", gap: "6px" }}>
         <input
           type="password"
