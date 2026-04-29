@@ -393,12 +393,7 @@ function scrapeCandidate(li: Element): ScrapedCandidate | null {
     education
   }
 
-  console.log(LOG_PREFIX, "Scraped candidate:", fullName, {
-    headline,
-    location,
-    industry,
-    connectionDegree,
-    pipelineStatus,
+  console.log(LOG_PREFIX, "Scraped candidate", {
     experienceCount: experience.length,
     totalExperienceCount,
     educationCount: education.length

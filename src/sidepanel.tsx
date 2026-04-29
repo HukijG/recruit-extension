@@ -209,7 +209,8 @@ function matchCandidates(
   const remaining = csv.map((c, i) => ({ csv: c, originalIndex: i }))
   const matched: MatchedCandidate[] = []
 
-  for (const s of scraped) {
+  for (let scrapedIndex = 0; scrapedIndex < scraped.length; scrapedIndex++) {
+    const s = scraped[scrapedIndex]
     const best = findBestCsvMatch(s, remaining)
 
     if (best) {
@@ -223,7 +224,7 @@ function matchCandidates(
 
       const status: MatchStatus = nameMatch ? "matched" : "warning"
 
-      console.log(LOG_PREFIX, `Match: "${s.fullName}" → CSV[${best.originalIndex}] "${best.csv.firstName} ${best.csv.lastName}" (score: ${best.score}, ${status})`)
+      console.log(LOG_PREFIX, `Match: scraped[${scrapedIndex}] → CSV[${best.originalIndex}] (score: ${best.score}, ${status})`)
 
       matched.push({
         scraped: s,
@@ -235,7 +236,7 @@ function matchCandidates(
       })
     } else {
       // No match found
-      console.warn(LOG_PREFIX, `No CSV match for: "${s.fullName}"`)
+      console.warn(LOG_PREFIX, `No CSV match for scraped[${scrapedIndex}]`)
       matched.push({
         scraped: s,
         csv: { firstName: "", lastName: "", currentCompany: "", profileUrl: "" },
@@ -634,7 +635,12 @@ function SidePanel() {
     }
 
     const { data } = result
-    console.log(LOG_PREFIX, "Add to job raw response:", JSON.stringify(data))
+    console.log(LOG_PREFIX, "Add to job response: counts only", {
+      added: data.added,
+      alreadyInJob: data.alreadyInJob,
+      errors: data.errors,
+      resultsCount: data.results?.length ?? 0
+    })
     // Derive from results array if available, otherwise fall back to top-level counts
     const added = data.results?.length
       ? data.results.filter((r) => r.status === "added").length
