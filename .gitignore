@@ -6,3 +6,14 @@ build
 export.csv
 *.html
 rf-candidate-added-information.json
+
+# Environment files (.env.example is committed; the real ones are not)
+.env
+.env.*
+!.env.example
+
+# TypeScript incremental build cache
+tsconfig.tsbuildinfo
+
+# This project uses pnpm; the npm lockfile is a stray
+package-lock.json
