@@ -1,8 +1,8 @@
 {
   "name": "recruit-extension",
-  "displayName": "LinkedIn Recruiter Scraper",
-  "version": "0.1.0",
-  "description": "Scrapes candidate data from LinkedIn Recruiter pipeline and sends to middleware",
+  "displayName": "Recruiter Pipeline Sync",
+  "version": "1.0.0",
+  "description": "Export selected candidates from your LinkedIn Recruiter pipeline view to your CRM and dialer in one click.",
   "author": "Joel Haines",
   "scripts": {
     "dev": "plasmo dev",
@@ -28,9 +28,6 @@
   },
   "manifest": {
     "permissions": [
-      "activeTab",
-      "tabs",
-      "scripting",
       "sidePanel",
       "storage"
     ],
