@@ -1,7 +1,10 @@
 import { sendToBackground } from "@plasmohq/messaging"
+import { Storage } from "@plasmohq/storage"
 import { useStorage } from "@plasmohq/storage/hook"
 import Papa from "papaparse"
 import { useCallback, useEffect, useRef, useState } from "react"
+
+const localStore = new Storage({ area: "local" })
 
 const LOG_PREFIX = "[LR-Scraper][SidePanel]"
 
@@ -335,7 +338,10 @@ function SidePanel() {
   const [csvError, setCsvError] = useState("")
   const [csvFileName, setCsvFileName] = useState("")
   const [middlewareUrl, setMiddlewareUrl] = useStorage<string>("middlewareUrl", "")
-  const [extensionSecret, setExtensionSecret] = useStorage<string>("extensionSecret", "")
+  const [extensionSecret, setExtensionSecret] = useStorage<string>(
+    { key: "extensionSecret", instance: localStore },
+    ""
+  )
   const [candidateResults, setCandidateResults] = useState<CandidateResult[]>([])
   const [sendProgress, setSendProgress] = useState("")
   const [jobs, setJobs] = useState<RFJob[]>([])
