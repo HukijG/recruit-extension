@@ -469,7 +469,7 @@ function SidePanel() {
     // useStorage-backed and intentionally preserved.
     resetTransientState()
     setWorkflowState("scraping")
-    setScrapeStatus("Scrolling page to load all candidates...")
+    setScrapeStatus("Loading candidates...")
 
     // Fetch fresh page info right now instead of relying on potentially stale polled state
     let freshPageInfo: PageInfo | null = null
@@ -694,7 +694,7 @@ function SidePanel() {
 
       {workflowState === "profiles_selected" && (
         <button onClick={handleScrape} style={styles.scrapeButton}>
-          Scrape {pageInfo?.checkedCount} Selected Profile
+          Sync {pageInfo?.checkedCount} Selected Profile
           {pageInfo?.checkedCount !== 1 ? "s" : ""}
         </button>
       )}
@@ -708,7 +708,7 @@ function SidePanel() {
           />
           <CandidateList candidates={scrapedCandidates} />
           <DebugJsonView
-            label="scraped data"
+            label="candidate data"
             data={scrapedCandidates}
           />
         </>
@@ -869,7 +869,7 @@ function StatusDisplay({
             <path d="M9 12l2 2 4-4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </div>
-        <p style={styles.statusText}>Select profiles to scrape</p>
+        <p style={styles.statusText}>Select profiles to sync</p>
       </div>
     )
   }
@@ -886,7 +886,7 @@ function StatusDisplay({
         <p style={styles.statusText}>
           {pageInfo?.checkedCount} profile{pageInfo?.checkedCount !== 1 ? "s" : ""} selected
         </p>
-        <p style={styles.statusSubtext}>Ready to scrape</p>
+        <p style={styles.statusSubtext}>Ready to sync</p>
       </div>
     )
   }
@@ -895,7 +895,7 @@ function StatusDisplay({
     return (
       <div style={styles.statusCentered}>
         <div style={styles.spinner} />
-        <p style={styles.statusText}>Scraping profiles...</p>
+        <p style={styles.statusText}>Loading profiles...</p>
         <p style={styles.statusSubtext}>{scrapeStatus}</p>
       </div>
     )
@@ -911,7 +911,7 @@ function StatusDisplay({
           </svg>
         </div>
         <p style={styles.statusText}>
-          {scrapedCount} candidate{scrapedCount !== 1 ? "s" : ""} scraped
+          {scrapedCount} candidate{scrapedCount !== 1 ? "s" : ""} ready
         </p>
         <p style={styles.statusSubtext}>Upload a CSV export to match</p>
       </div>
@@ -1076,7 +1076,7 @@ function ReviewTable({
                     ) : m.status === "warning" ? (
                       <span
                         style={{ color: "#f39c12", cursor: "help" }}
-                        title={`Scraped: "${m.normalizedScraped}" vs CSV: "${m.normalizedCsv}"`}>
+                        title={`Candidate: "${m.normalizedScraped}" vs CSV: "${m.normalizedCsv}"`}>
                         ⚠
                       </span>
                     ) : (
@@ -1486,7 +1486,7 @@ function JobModal({
 function CandidateList({ candidates }: { candidates: ScrapedCandidate[] }) {
   return (
     <div style={styles.candidateList}>
-      <p style={styles.sectionTitle}>Scraped Candidates</p>
+      <p style={styles.sectionTitle}>Selected Candidates</p>
       {candidates.map((c, i) => (
         <div key={i} style={styles.candidateCard}>
           <div style={styles.candidateHeader}>
