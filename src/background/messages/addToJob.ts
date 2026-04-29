@@ -1,16 +1,23 @@
 import type { PlasmoMessaging } from "@plasmohq/messaging"
 
 const LOG_PREFIX = "[LR-Scraper][Background]"
+const MIDDLEWARE_URL = process.env.PLASMO_PUBLIC_MIDDLEWARE_URL
 
 const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
-  const { middlewareUrl, rfIds, jobId, secret } = req.body ?? {}
-
-  if (!middlewareUrl || !rfIds?.length || !jobId) {
-    res.send({ ok: false, error: "Missing middlewareUrl, rfIds, or jobId" })
+  if (!MIDDLEWARE_URL) {
+    console.error(LOG_PREFIX, "addToJob: PLASMO_PUBLIC_MIDDLEWARE_URL not set at build time")
+    res.send({ ok: false, error: "Middleware URL not configured at build time. Rebuild with .env.production set." })
     return
   }
 
-  const url = `${middlewareUrl.replace(/\/+$/, "")}/candidates/add-to-job`
+  const { rfIds, jobId, secret } = req.body ?? {}
+
+  if (!rfIds?.length || !jobId) {
+    res.send({ ok: false, error: "Missing rfIds or jobId" })
+    return
+  }
+
+  const url = `${MIDDLEWARE_URL.replace(/\/+$/, "")}/candidates/add-to-job`
   console.log(LOG_PREFIX, `addToJob: POST ${url} — ${rfIds.length} candidates to job ${jobId}`)
 
   const headers: Record<string, string> = { "Content-Type": "application/json" }
