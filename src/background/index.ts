@@ -1,6 +1,6 @@
 import { Storage } from "@plasmohq/storage"
 
-const LOG_PREFIX = "[LR-Scraper][Background]"
+const LOG_PREFIX = "[LR-Sync][Background]"
 
 // Open the side panel when the extension icon is clicked
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })

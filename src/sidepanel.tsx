@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 
 const localStore = new Storage({ area: "local" })
 
-const LOG_PREFIX = "[LR-Scraper][SidePanel]"
+const LOG_PREFIX = "[LR-Sync][SidePanel]"
 
 // --- Types ---
 
@@ -14,8 +14,8 @@ type WorkflowState =
   | "not_on_pipeline"
   | "no_selection"
   | "profiles_selected"
-  | "scraping"
-  | "scraped"
+  | "loading"
+  | "ready"
   | "csv_matched"
   | "sending"
   | "complete"
@@ -45,7 +45,7 @@ interface EducationEntry {
   endYear: number | null
 }
 
-interface ScrapedCandidate {
+interface Candidate {
   fullName: string
   internalTalentUrl: string
   headline: string
@@ -67,10 +67,10 @@ interface CsvRow {
 }
 
 interface MatchedCandidate {
-  scraped: ScrapedCandidate
+  candidate: Candidate
   csv: CsvRow
   status: MatchStatus
-  normalizedScraped: string
+  normalizedCandidate: string
   normalizedCsv: string
   checked: boolean
 }
@@ -168,20 +168,20 @@ function parseCsv(text: string): CsvRow[] {
 // --- Matching ---
 
 function findBestCsvMatch(
-  scraped: ScrapedCandidate,
+  candidate: Candidate,
   remaining: { csv: CsvRow; originalIndex: number }[]
 ): { csv: CsvRow; originalIndex: number; score: number } | null {
-  const sName = normalize(scraped.fullName)
+  const sName = normalize(candidate.fullName)
   // Get company from first current experience entry, or empty
   const sCompany = normalize(
-    scraped.experience.find((e) => e.isCurrent)?.company ?? ""
+    candidate.experience.find((e) => e.isCurrent)?.company ?? ""
   )
 
   let bestMatch: { csv: CsvRow; originalIndex: number; score: number } | null = null
 
-  for (const candidate of remaining) {
-    const cName = normalize(`${candidate.csv.firstName} ${candidate.csv.lastName}`)
-    const cCompany = normalize(candidate.csv.currentCompany)
+  for (const entry of remaining) {
+    const cName = normalize(`${entry.csv.firstName} ${entry.csv.lastName}`)
+    const cCompany = normalize(entry.csv.currentCompany)
 
     let score = 0
 
@@ -195,7 +195,7 @@ function findBestCsvMatch(
     }
 
     if (score > 0 && (!bestMatch || score > bestMatch.score)) {
-      bestMatch = { ...candidate, score }
+      bestMatch = { ...entry, score }
     }
   }
 
@@ -203,14 +203,14 @@ function findBestCsvMatch(
 }
 
 function matchCandidates(
-  scraped: ScrapedCandidate[],
+  candidates: Candidate[],
   csv: CsvRow[]
 ): MatchedCandidate[] {
   const remaining = csv.map((c, i) => ({ csv: c, originalIndex: i }))
   const matched: MatchedCandidate[] = []
 
-  for (let scrapedIndex = 0; scrapedIndex < scraped.length; scrapedIndex++) {
-    const s = scraped[scrapedIndex]
+  for (let i = 0; i < candidates.length; i++) {
+    const s = candidates[i]
     const best = findBestCsvMatch(s, remaining)
 
     if (best) {
@@ -218,30 +218,30 @@ function matchCandidates(
       const idx = remaining.findIndex((r) => r.originalIndex === best.originalIndex)
       remaining.splice(idx, 1)
 
-      const normalizedScraped = normalize(s.fullName)
+      const normalizedCandidate = normalize(s.fullName)
       const normalizedCsv = normalize(`${best.csv.firstName} ${best.csv.lastName}`)
-      const nameMatch = normalizedScraped === normalizedCsv
+      const nameMatch = normalizedCandidate === normalizedCsv
 
       const status: MatchStatus = nameMatch ? "matched" : "warning"
 
-      console.log(LOG_PREFIX, `Match: scraped[${scrapedIndex}] → CSV[${best.originalIndex}] (score: ${best.score}, ${status})`)
+      console.log(LOG_PREFIX, `Match: candidate[${i}] → CSV[${best.originalIndex}] (score: ${best.score}, ${status})`)
 
       matched.push({
-        scraped: s,
+        candidate: s,
         csv: best.csv,
         status,
-        normalizedScraped,
+        normalizedCandidate,
         normalizedCsv,
         checked: true
       })
     } else {
       // No match found
-      console.warn(LOG_PREFIX, `No CSV match for scraped[${scrapedIndex}]`)
+      console.warn(LOG_PREFIX, `No CSV match for candidate[${i}]`)
       matched.push({
-        scraped: s,
+        candidate: s,
         csv: { firstName: "", lastName: "", currentCompany: "", profileUrl: "" },
         status: "error",
-        normalizedScraped: normalize(s.fullName),
+        normalizedCandidate: normalize(s.fullName),
         normalizedCsv: "",
         checked: false
       })
@@ -261,17 +261,17 @@ function matchCandidates(
 function buildPayload(m: MatchedCandidate): CandidatePayload {
   return {
     linkedinUrl: m.csv.profileUrl,
-    internalTalentUrl: m.scraped.internalTalentUrl,
-    fullName: m.scraped.fullName,
-    headline: m.scraped.headline,
-    location: m.scraped.location,
-    industry: m.scraped.industry,
-    photoUrl: m.scraped.photoUrl,
-    connectionDegree: m.scraped.connectionDegree,
-    pipelineStatus: m.scraped.pipelineStatus,
-    experience: m.scraped.experience,
-    totalExperienceCount: m.scraped.totalExperienceCount,
-    education: m.scraped.education
+    internalTalentUrl: m.candidate.internalTalentUrl,
+    fullName: m.candidate.fullName,
+    headline: m.candidate.headline,
+    location: m.candidate.location,
+    industry: m.candidate.industry,
+    photoUrl: m.candidate.photoUrl,
+    connectionDegree: m.candidate.connectionDegree,
+    pipelineStatus: m.candidate.pipelineStatus,
+    experience: m.candidate.experience,
+    totalExperienceCount: m.candidate.totalExperienceCount,
+    education: m.candidate.education
   }
 }
 
@@ -316,8 +316,8 @@ async function addCandidatesToJob(
 
 const spinnerStyle = document.createElement("style")
 spinnerStyle.textContent = `@keyframes spin { to { transform: rotate(360deg); } }`
-if (!document.querySelector("[data-lr-scraper-styles]")) {
-  spinnerStyle.setAttribute("data-lr-scraper-styles", "")
+if (!document.querySelector("[data-lr-sync-styles]")) {
+  spinnerStyle.setAttribute("data-lr-sync-styles", "")
   document.head.appendChild(spinnerStyle)
 }
 
@@ -327,10 +327,10 @@ function SidePanel() {
   const [workflowState, setWorkflowState] =
     useState<WorkflowState>("not_on_pipeline")
   const [pageInfo, setPageInfo] = useState<PageInfo | null>(null)
-  const [scrapedCandidates, setScrapedCandidates] = useState<
-    ScrapedCandidate[]
+  const [candidates, setCandidates] = useState<
+    Candidate[]
   >([])
-  const [scrapeStatus, setScrapeStatus] = useState("")
+  const [loadStatus, setLoadStatus] = useState("")
   const [matchedCandidates, setMatchedCandidates] = useState<
     MatchedCandidate[]
   >([])
@@ -357,11 +357,11 @@ function SidePanel() {
 
       if (!response || !response.isPipelinePage) {
         setPageInfo(null)
-        // Don't blow away state if we have scraped/matched data
+        // Don't blow away state if we have loaded/matched data
         setWorkflowState((prev) => {
           if (
-            prev === "scraping" ||
-            prev === "scraped" ||
+            prev === "loading" ||
+            prev === "ready" ||
             prev === "csv_matched" ||
             prev === "sending" ||
             prev === "complete" ||
@@ -380,8 +380,8 @@ function SidePanel() {
       if (response.checkedCount === 0) {
         setWorkflowState((prev) => {
           if (
-            prev === "scraping" ||
-            prev === "scraped" ||
+            prev === "loading" ||
+            prev === "ready" ||
             prev === "csv_matched" ||
             prev === "sending" ||
             prev === "complete" ||
@@ -395,8 +395,8 @@ function SidePanel() {
       } else {
         setWorkflowState((prev) => {
           if (
-            prev === "scraping" ||
-            prev === "scraped" ||
+            prev === "loading" ||
+            prev === "ready" ||
             prev === "csv_matched" ||
             prev === "sending" ||
             prev === "complete" ||
@@ -412,8 +412,8 @@ function SidePanel() {
       setPageInfo(null)
       setWorkflowState((prev) => {
         if (
-          prev === "scraping" ||
-          prev === "scraped" ||
+          prev === "loading" ||
+          prev === "ready" ||
           prev === "csv_matched" ||
           prev === "sending" ||
           prev === "complete"
@@ -448,8 +448,8 @@ function SidePanel() {
   }, [pollPageInfo])
 
   const resetTransientState = useCallback(() => {
-    setScrapedCandidates([])
-    setScrapeStatus("")
+    setCandidates([])
+    setLoadStatus("")
     setMatchedCandidates([])
     setCsvError("")
     setCsvFileName("")
@@ -462,14 +462,14 @@ function SidePanel() {
     setShowJobModal(false)
   }, [])
 
-  const handleScrape = useCallback(async () => {
-    console.log(LOG_PREFIX, "Scrape started — clearing transient state")
-    // Full reset of transient state so each scrape starts from the same baseline
+  const handleSync = useCallback(async () => {
+    console.log(LOG_PREFIX, "Sync started — clearing transient state")
+    // Full reset of transient state so each sync starts from the same baseline
     // a fresh page+extension load gives us. extensionSecret is
     // useStorage-backed and intentionally preserved.
     resetTransientState()
-    setWorkflowState("scraping")
-    setScrapeStatus("Loading candidates...")
+    setWorkflowState("loading")
+    setLoadStatus("Loading candidates...")
 
     // Fetch fresh page info right now instead of relying on potentially stale polled state
     let freshPageInfo: PageInfo | null = null
@@ -487,7 +487,7 @@ function SidePanel() {
 
     if (!scrollResult?.success) {
       console.error(LOG_PREFIX, "scrollToBottom failed:", scrollResult)
-      setScrapeStatus("Failed to scroll page. Try again.")
+      setLoadStatus("Failed to scroll page. Try again.")
       setWorkflowState("profiles_selected")
       return
     }
@@ -497,31 +497,31 @@ function SidePanel() {
       "Scroll complete. Rows loaded:",
       scrollResult.totalRowsLoaded
     )
-    setScrapeStatus("Extracting candidate data...")
+    setLoadStatus("Extracting candidate data...")
 
-    const scrapeResult = await sendToBackground({
+    const loadResult = await sendToBackground({
       name: "getSelectedCandidates"
     })
 
-    if (!scrapeResult) {
+    if (!loadResult) {
       console.error(LOG_PREFIX, "getSelectedCandidates failed")
-      setScrapeStatus("Failed to extract candidates. Try again.")
+      setLoadStatus("Failed to extract candidates. Try again.")
       setWorkflowState("profiles_selected")
       return
     }
 
     console.log(
       LOG_PREFIX,
-      "Scrape complete.",
-      scrapeResult.scrapedCount,
-      "candidates scraped"
+      "Sync complete.",
+      loadResult.count,
+      "candidates ready"
     )
 
-    setScrapedCandidates(scrapeResult.candidates)
-    setScrapeStatus(
-      `Scraped ${scrapeResult.scrapedCount} candidate${scrapeResult.scrapedCount !== 1 ? "s" : ""}`
+    setCandidates(loadResult.candidates)
+    setLoadStatus(
+      `${loadResult.count} candidate${loadResult.count !== 1 ? "s" : ""} ready`
     )
-    setWorkflowState("scraped")
+    setWorkflowState("ready")
   }, [pageInfo, resetTransientState])
 
   const handleCsvFile = useCallback(
@@ -539,15 +539,15 @@ function SidePanel() {
         }
 
         const csvRows = parseCsv(text)
-        console.log(LOG_PREFIX, "CSV rows:", csvRows.length, "Scraped:", scrapedCandidates.length)
+        console.log(LOG_PREFIX, "CSV rows:", csvRows.length, "Candidates:", candidates.length)
 
-        if (csvRows.length < scrapedCandidates.length) {
+        if (csvRows.length < candidates.length) {
           setCsvError(
-            `CSV has fewer rows (${csvRows.length}) than scraped candidates (${scrapedCandidates.length}). Some candidates won't have a match.`
+            `CSV has fewer rows (${csvRows.length}) than synced candidates (${candidates.length}). Some candidates won't have a match.`
           )
         }
 
-        const matched = matchCandidates(scrapedCandidates, csvRows)
+        const matched = matchCandidates(candidates, csvRows)
         setMatchedCandidates(matched)
         setWorkflowState("csv_matched")
 
@@ -563,7 +563,7 @@ function SidePanel() {
       }
       reader.readAsText(file)
     },
-    [scrapedCandidates]
+    [candidates]
   )
 
   const toggleCandidate = useCallback((index: number) => {
@@ -668,7 +668,7 @@ function SidePanel() {
   }, [resetTransientState])
 
   const showResetButton =
-    workflowState === "scraped" ||
+    workflowState === "ready" ||
     workflowState === "csv_matched" ||
     workflowState === "complete" ||
     workflowState === "job_added"
@@ -688,28 +688,28 @@ function SidePanel() {
       <StatusDisplay
         state={workflowState}
         pageInfo={pageInfo}
-        scrapeStatus={scrapeStatus}
-        scrapedCount={scrapedCandidates.length}
+        loadStatus={loadStatus}
+        count={candidates.length}
       />
 
       {workflowState === "profiles_selected" && (
-        <button onClick={handleScrape} style={styles.scrapeButton}>
+        <button onClick={handleSync} style={styles.syncButton}>
           Sync {pageInfo?.checkedCount} Selected Profile
           {pageInfo?.checkedCount !== 1 ? "s" : ""}
         </button>
       )}
 
-      {workflowState === "scraped" && scrapedCandidates.length > 0 && (
+      {workflowState === "ready" && candidates.length > 0 && (
         <>
           <CsvDropZone
             onFile={handleCsvFile}
             fileName={csvFileName}
             error={csvError}
           />
-          <CandidateList candidates={scrapedCandidates} />
+          <CandidateList candidates={candidates} />
           <DebugJsonView
             label="candidate data"
-            data={scrapedCandidates}
+            data={candidates}
           />
         </>
       )}
@@ -725,7 +725,7 @@ function SidePanel() {
             onClick={handleSend}
             disabled={!canSend}
             style={{
-              ...styles.scrapeButton,
+              ...styles.syncButton,
               backgroundColor: canSend ? "#27ae60" : "#ccc",
               cursor: canSend ? "pointer" : "not-allowed"
             }}>
@@ -735,7 +735,7 @@ function SidePanel() {
             label="match debug"
             data={matchedCandidates.map((m, i) => ({
               index: i,
-              scrapedName: m.normalizedScraped,
+              candidateName: m.normalizedCandidate,
               csvName: m.normalizedCsv,
               status: m.status,
               profileUrl: m.csv.profileUrl
@@ -765,12 +765,12 @@ function SidePanel() {
             <>
               <button
                 onClick={handleSend}
-                style={{ ...styles.scrapeButton, backgroundColor: "#e67e22" }}>
+                style={{ ...styles.syncButton, backgroundColor: "#e67e22" }}>
                 Retry
               </button>
               <button
                 onClick={() => setWorkflowState("csv_matched")}
-                style={{ ...styles.scrapeButton, backgroundColor: "#888" }}>
+                style={{ ...styles.syncButton, backgroundColor: "#888" }}>
                 Back to Review
               </button>
             </>
@@ -779,7 +779,7 @@ function SidePanel() {
             <button
               onClick={() => setShowJobModal(true)}
               style={{
-                ...styles.scrapeButton,
+                ...styles.syncButton,
                 backgroundColor: "#0a66c2"
               }}>
               Add {rfIds.length} to Job
@@ -820,7 +820,7 @@ function SidePanel() {
           <button
             onClick={handleReset}
             style={{
-              ...styles.scrapeButton,
+              ...styles.syncButton,
               backgroundColor: "#0a66c2",
               marginTop: "12px"
             }}>
@@ -837,13 +837,13 @@ function SidePanel() {
 function StatusDisplay({
   state,
   pageInfo,
-  scrapeStatus,
-  scrapedCount
+  loadStatus,
+  count
 }: {
   state: WorkflowState
   pageInfo: PageInfo | null
-  scrapeStatus: string
-  scrapedCount: number
+  loadStatus: string
+  count: number
 }) {
   if (state === "not_on_pipeline") {
     return (
@@ -891,17 +891,17 @@ function StatusDisplay({
     )
   }
 
-  if (state === "scraping") {
+  if (state === "loading") {
     return (
       <div style={styles.statusCentered}>
         <div style={styles.spinner} />
         <p style={styles.statusText}>Loading profiles...</p>
-        <p style={styles.statusSubtext}>{scrapeStatus}</p>
+        <p style={styles.statusSubtext}>{loadStatus}</p>
       </div>
     )
   }
 
-  if (state === "scraped") {
+  if (state === "ready") {
     return (
       <div style={styles.statusCentered}>
         <div style={styles.statusIcon}>
@@ -911,7 +911,7 @@ function StatusDisplay({
           </svg>
         </div>
         <p style={styles.statusText}>
-          {scrapedCount} candidate{scrapedCount !== 1 ? "s" : ""} ready
+          {count} candidate{count !== 1 ? "s" : ""} ready
         </p>
         <p style={styles.statusSubtext}>Upload a CSV export to match</p>
       </div>
@@ -1050,11 +1050,11 @@ function ReviewTable({
                     />
                   </td>
                   <td style={styles.td}>
-                    <span style={styles.tdName}>{m.scraped.fullName}</span>
+                    <span style={styles.tdName}>{m.candidate.fullName}</span>
                   </td>
                   <td style={styles.td}>
                     <span style={styles.tdDetail}>
-                      {m.scraped.experience[0]?.title || m.scraped.headline}
+                      {m.candidate.experience[0]?.title || m.candidate.headline}
                     </span>
                   </td>
                   <td style={styles.td}>
@@ -1076,7 +1076,7 @@ function ReviewTable({
                     ) : m.status === "warning" ? (
                       <span
                         style={{ color: "#f39c12", cursor: "help" }}
-                        title={`Candidate: "${m.normalizedScraped}" vs CSV: "${m.normalizedCsv}"`}>
+                        title={`Candidate: "${m.normalizedCandidate}" vs CSV: "${m.normalizedCsv}"`}>
                         ⚠
                       </span>
                     ) : (
@@ -1483,7 +1483,7 @@ function JobModal({
 
 // --- Candidate List ---
 
-function CandidateList({ candidates }: { candidates: ScrapedCandidate[] }) {
+function CandidateList({ candidates }: { candidates: Candidate[] }) {
   return (
     <div style={styles.candidateList}>
       <p style={styles.sectionTitle}>Selected Candidates</p>
@@ -1587,7 +1587,7 @@ const styles: Record<string, React.CSSProperties> = {
     maxWidth: "220px",
     lineHeight: "1.4"
   },
-  scrapeButton: {
+  syncButton: {
     padding: "10px 20px",
     backgroundColor: "#0a66c2",
     color: "white",

@@ -1,6 +1,6 @@
 import type { PlasmoMessaging } from "@plasmohq/messaging"
 
-const LOG_PREFIX = "[LR-Scraper][Background]"
+const LOG_PREFIX = "[LR-Sync][Background]"
 
 const handler: PlasmoMessaging.MessageHandler = async (_req, res) => {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true })

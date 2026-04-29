@@ -4,7 +4,7 @@ export const config: PlasmoCSConfig = {
   matches: ["https://www.linkedin.com/talent/*"]
 }
 
-const LOG_PREFIX = "[LR-Scraper][Content]"
+const LOG_PREFIX = "[LR-Sync][Content]"
 
 console.log(LOG_PREFIX, "Content script loaded on:", window.location.href)
 
@@ -36,7 +36,7 @@ interface EducationEntry {
   endYear: number | null
 }
 
-interface ScrapedCandidate {
+interface Candidate {
   fullName: string
   internalTalentUrl: string
   headline: string
@@ -51,8 +51,8 @@ interface ScrapedCandidate {
 }
 
 interface GetSelectedCandidatesResponse {
-  candidates: ScrapedCandidate[]
-  scrapedCount: number
+  candidates: Candidate[]
+  count: number
 }
 
 // --- Page info helpers ---
@@ -139,7 +139,7 @@ async function scrollToLoadAllProfiles(
 
   // Always run the loop — it exits at iter 0 if everything's already populated.
   // The prior "skip if alreadyPopulated >= target" shortcut would falsely fire
-  // after pagination when LinkedIn left stale content in the DOM, scraping the
+  // after pagination when LinkedIn left stale content in the DOM, capturing the
   // old page's data; running through the loop costs nothing in the happy case.
   // lastPopulated init -1 so the first measurement isn't counted as a stall.
   let stalls = 0
@@ -358,10 +358,10 @@ function parseEducationEntries(container: Element): EducationEntry[] {
   })
 }
 
-function scrapeCandidate(li: Element): ScrapedCandidate | null {
+function captureCandidate(li: Element): Candidate | null {
   const row = li.querySelector(".standard-profile-row")
   if (!row) {
-    console.warn(LOG_PREFIX, "scrapeCandidate: No .standard-profile-row found")
+    console.warn(LOG_PREFIX, "captureCandidate: No .standard-profile-row found")
     return null
   }
 
@@ -379,7 +379,7 @@ function scrapeCandidate(li: Element): ScrapedCandidate | null {
   const { experience, totalExperienceCount } = parseExperienceEntries(row)
   const education = parseEducationEntries(row)
 
-  const candidate: ScrapedCandidate = {
+  const candidate: Candidate = {
     fullName,
     internalTalentUrl,
     headline,
@@ -393,7 +393,7 @@ function scrapeCandidate(li: Element): ScrapedCandidate | null {
     education
   }
 
-  console.log(LOG_PREFIX, "Scraped candidate", {
+  console.log(LOG_PREFIX, "Captured candidate", {
     experienceCount: experience.length,
     totalExperienceCount,
     educationCount: education.length
@@ -409,7 +409,7 @@ function getSelectedCandidates(): GetSelectedCandidatesResponse {
 
   console.log(LOG_PREFIX, "getSelectedCandidates: Total rows in DOM:", allRows.length)
 
-  const candidates: ScrapedCandidate[] = []
+  const candidates: Candidate[] = []
 
   for (const li of allRows) {
     const checkbox = li.querySelector(
@@ -417,7 +417,7 @@ function getSelectedCandidates(): GetSelectedCandidatesResponse {
     ) as HTMLInputElement | null
     if (!checkbox?.checked) continue
 
-    const candidate = scrapeCandidate(li)
+    const candidate = captureCandidate(li)
     if (candidate) {
       candidates.push(candidate)
     }
@@ -425,12 +425,12 @@ function getSelectedCandidates(): GetSelectedCandidatesResponse {
 
   console.log(
     LOG_PREFIX,
-    "getSelectedCandidates: Scraped",
+    "getSelectedCandidates: captured",
     candidates.length,
     "selected candidates"
   )
 
-  return { candidates, scrapedCount: candidates.length }
+  return { candidates, count: candidates.length }
 }
 
 // --- Message listener ---

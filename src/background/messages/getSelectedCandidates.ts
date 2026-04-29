@@ -1,6 +1,6 @@
 import type { PlasmoMessaging } from "@plasmohq/messaging"
 
-const LOG_PREFIX = "[LR-Scraper][Background]"
+const LOG_PREFIX = "[LR-Sync][Background]"
 
 const handler: PlasmoMessaging.MessageHandler = async (_req, res) => {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
@@ -8,7 +8,7 @@ const handler: PlasmoMessaging.MessageHandler = async (_req, res) => {
 
   if (!tab?.id) {
     console.error(LOG_PREFIX, "getSelectedCandidates: No active tab")
-    res.send({ candidates: [], scrapedCount: 0 })
+    res.send({ candidates: [], count: 0 })
     return
   }
 
@@ -19,7 +19,7 @@ const handler: PlasmoMessaging.MessageHandler = async (_req, res) => {
     res.send(response)
   } catch (err) {
     console.error(LOG_PREFIX, "getSelectedCandidates relay failed:", err)
-    res.send({ candidates: [], scrapedCount: 0 })
+    res.send({ candidates: [], count: 0 })
   }
 }
 

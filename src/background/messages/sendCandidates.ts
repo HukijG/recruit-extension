@@ -1,6 +1,6 @@
 import type { PlasmoMessaging } from "@plasmohq/messaging"
 
-const LOG_PREFIX = "[LR-Scraper][Background]"
+const LOG_PREFIX = "[LR-Sync][Background]"
 const MIDDLEWARE_URL = process.env.PLASMO_PUBLIC_MIDDLEWARE_URL
 
 const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
