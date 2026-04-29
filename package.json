@@ -6,6 +6,7 @@
   "author": "Joel Haines",
   "scripts": {
     "dev": "plasmo dev",
+    "prebuild": "dotenv -e .env.production -- node -e \"if(!process.env.PLASMO_PUBLIC_MIDDLEWARE_URL){console.error('ERROR: PLASMO_PUBLIC_MIDDLEWARE_URL is unset. Create .env.production with the worker URL.');process.exit(1)}\"",
     "build": "plasmo build",
     "package": "plasmo package"
   },
@@ -23,6 +24,7 @@
     "@types/papaparse": "^5.5.2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "dotenv-cli": "^11.0.0",
     "prettier": "3.3.3",
     "typescript": "^5.7.2"
   },
@@ -33,7 +35,7 @@
     ],
     "host_permissions": [
       "https://www.linkedin.com/talent/*",
-      "<all_urls>"
+      "$PLASMO_PUBLIC_MIDDLEWARE_URL/*"
     ]
   }
 }
