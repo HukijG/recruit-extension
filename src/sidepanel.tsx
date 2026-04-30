@@ -711,6 +711,73 @@ function SidePanel() {
     }
   }, [mode, candidateUrlId, fetchCandidate])
 
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [errorToast, setErrorToast] = useState<string | null>(null)
+
+  const fireMarkInvalid = useCallback(
+    async (rfId: number, urlId: string) => {
+      // Move to submitting (only if we're still on the same candidate).
+      setCandidateState((prev) => {
+        if (prev.phase !== "ready" || prev.urlId !== urlId) return prev
+        return { ...prev, markInvalid: { status: "submitting" } }
+      })
+
+      const resp = await sendToBackground<any, { ok: boolean; error?: string }>({
+        name: "markNumberInvalid",
+        body: { rfId, secret: extensionSecret }
+      }).catch((err) => ({ ok: false, error: err?.message ?? "Network error" }))
+
+      setCandidateState((prev) => {
+        if (prev.phase !== "ready" || prev.urlId !== urlId) return prev
+        if (resp?.ok) {
+          return { ...prev, markInvalid: { status: "marked" } }
+        }
+        return {
+          ...prev,
+          markInvalid: { status: "error", message: resp?.error ?? "Failed to mark invalid" }
+        }
+      })
+
+      if (!resp?.ok) {
+        setErrorToast(resp?.error ?? "Failed to mark invalid")
+        // Auto-dismiss the error toast after 5s.
+        setTimeout(() => setErrorToast(null), 5000)
+      }
+    },
+    [extensionSecret]
+  )
+
+  const handleArmMarkInvalid = useCallback(() => {
+    if (candidateState.phase !== "ready") return
+    const { urlId, details } = candidateState
+    setCandidateState({
+      ...candidateState,
+      markInvalid: { status: "armed", undoExpiresAt: Date.now() + UNDO_DELAY_MS }
+    })
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current)
+    undoTimerRef.current = setTimeout(() => {
+      undoTimerRef.current = null
+      fireMarkInvalid(details.rfId, urlId)
+    }, UNDO_DELAY_MS)
+  }, [candidateState, fireMarkInvalid])
+
+  const handleUndoMarkInvalid = useCallback(() => {
+    if (undoTimerRef.current) {
+      clearTimeout(undoTimerRef.current)
+      undoTimerRef.current = null
+    }
+    setCandidateState((prev) => {
+      if (prev.phase !== "ready") return prev
+      return { ...prev, markInvalid: { status: "idle" } }
+    })
+  }, [])
+
+  const handleRetryMarkInvalid = useCallback(() => {
+    if (candidateState.phase !== "ready") return
+    const { urlId, details } = candidateState
+    fireMarkInvalid(details.rfId, urlId)
+  }, [candidateState, fireMarkInvalid])
+
   const handleSync = useCallback(async () => {
     // Full reset of transient state so each sync starts from the same baseline
     // a fresh page+extension load gives us. extensionSecret is
@@ -892,10 +959,23 @@ function SidePanel() {
       <ConsultantNameHeader />
 
       {mode === "candidate" && (
-        <CandidateView
-          state={candidateState}
-          onRetry={() => candidateUrlId && fetchCandidate(candidateUrlId)}
-        />
+        <>
+          <CandidateView
+            state={candidateState}
+            onRetry={() => candidateUrlId && fetchCandidate(candidateUrlId)}
+            onArmMarkInvalid={handleArmMarkInvalid}
+            onUndoMarkInvalid={handleUndoMarkInvalid}
+            onRetryMarkInvalid={handleRetryMarkInvalid}
+          />
+          {candidateState.phase === "ready" &&
+            candidateState.markInvalid.status === "armed" && (
+              <UndoToast
+                message={`Marked ${candidateState.details.phoneNumber ?? "number"} invalid`}
+                onUndo={handleUndoMarkInvalid}
+              />
+            )}
+          {errorToast && <ErrorToast message={errorToast} />}
+        </>
       )}
 
       {mode === "sync" && (
@@ -1042,10 +1122,16 @@ function SidePanel() {
 
 function CandidateView({
   state,
-  onRetry
+  onRetry,
+  onArmMarkInvalid,
+  onUndoMarkInvalid,
+  onRetryMarkInvalid
 }: {
   state: CandidateState
   onRetry: () => void
+  onArmMarkInvalid: () => void
+  onUndoMarkInvalid: () => void
+  onRetryMarkInvalid: () => void
 }) {
   if (state.phase === "idle" || state.phase === "loading") {
     return (
@@ -1078,7 +1164,17 @@ function CandidateView({
   return (
     <div style={candidateStyles.container}>
       <p style={candidateStyles.candidateName}>{state.details.fullName}</p>
-      <CandidatePhoneRow phoneNumber={state.details.phoneNumber} />
+      <div style={candidateStyles.phoneAndInvalidRow}>
+        <CandidatePhoneRow phoneNumber={state.details.phoneNumber} />
+        <NumberInvalidButton
+          rfId={state.details.rfId}
+          phoneNumber={state.details.phoneNumber}
+          state={state.markInvalid}
+          onArm={onArmMarkInvalid}
+          onUndo={onUndoMarkInvalid}
+          onRetry={onRetryMarkInvalid}
+        />
+      </div>
       <CandidateJobBox job={state.details.job} />
       <CandidateColdCallList activities={state.details.activities} />
     </div>
@@ -1193,6 +1289,78 @@ function formatActivityDate(iso: string): string {
     month: "short",
     day: "numeric"
   })
+}
+
+const UNDO_DELAY_MS = 5000
+
+function NumberInvalidButton({
+  rfId,
+  phoneNumber,
+  state,
+  onArm,
+  onUndo,
+  onRetry
+}: {
+  rfId: number
+  phoneNumber: string | null
+  state: MarkInvalidState
+  onArm: () => void
+  onUndo: () => void
+  onRetry: () => void
+}) {
+  const isDisabled = phoneNumber == null
+  const isMarked =
+    state.status === "armed" ||
+    state.status === "submitting" ||
+    state.status === "marked"
+
+  if (state.status === "error") {
+    return (
+      <button onClick={onRetry} style={candidateStyles.invalidButtonError}>
+        Retry mark invalid
+      </button>
+    )
+  }
+
+  return (
+    <button
+      onClick={onArm}
+      disabled={isDisabled || isMarked}
+      style={
+        isMarked
+          ? candidateStyles.invalidButtonMarked
+          : isDisabled
+            ? candidateStyles.invalidButtonDisabled
+            : candidateStyles.invalidButton
+      }>
+      {isMarked ? "Marked invalid ✓" : "Number Invalid"}
+    </button>
+  )
+}
+
+function UndoToast({
+  message,
+  onUndo
+}: {
+  message: string
+  onUndo: () => void
+}) {
+  return (
+    <div style={candidateStyles.toast}>
+      <span style={candidateStyles.toastMessage}>{message}</span>
+      <button onClick={onUndo} style={candidateStyles.toastUndo}>
+        Undo
+      </button>
+    </div>
+  )
+}
+
+function ErrorToast({ message }: { message: string }) {
+  return (
+    <div style={candidateStyles.toastError}>
+      <span style={candidateStyles.toastMessage}>{message}</span>
+    </div>
+  )
 }
 
 const candidateStyles: Record<string, React.CSSProperties> = {
@@ -1327,6 +1495,96 @@ const candidateStyles: Record<string, React.CSSProperties> = {
     color: "#555",
     fontStyle: "italic",
     lineHeight: "1.4"
+  },
+  phoneAndInvalidRow: {
+    width: "100%",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "8px"
+  },
+  invalidButton: {
+    padding: "6px 14px",
+    fontSize: "12px",
+    fontWeight: 500,
+    color: "#e74c3c",
+    backgroundColor: "#fff",
+    border: "1px solid #e74c3c",
+    borderRadius: "16px",
+    cursor: "pointer"
+  },
+  invalidButtonMarked: {
+    padding: "6px 14px",
+    fontSize: "12px",
+    fontWeight: 500,
+    color: "#888",
+    backgroundColor: "#f5f5f5",
+    border: "1px solid #ddd",
+    borderRadius: "16px",
+    cursor: "default"
+  },
+  invalidButtonDisabled: {
+    padding: "6px 14px",
+    fontSize: "12px",
+    fontWeight: 500,
+    color: "#bbb",
+    backgroundColor: "#fafafa",
+    border: "1px solid #eee",
+    borderRadius: "16px",
+    cursor: "not-allowed"
+  },
+  invalidButtonError: {
+    padding: "6px 14px",
+    fontSize: "12px",
+    fontWeight: 500,
+    color: "#fff",
+    backgroundColor: "#e74c3c",
+    border: "none",
+    borderRadius: "16px",
+    cursor: "pointer"
+  },
+  toast: {
+    position: "fixed",
+    bottom: "16px",
+    left: "16px",
+    right: "16px",
+    padding: "10px 14px",
+    backgroundColor: "#333",
+    color: "#fff",
+    borderRadius: "8px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+    fontSize: "13px",
+    boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+    zIndex: 100
+  },
+  toastError: {
+    position: "fixed",
+    bottom: "16px",
+    left: "16px",
+    right: "16px",
+    padding: "10px 14px",
+    backgroundColor: "#e74c3c",
+    color: "#fff",
+    borderRadius: "8px",
+    fontSize: "13px",
+    boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+    zIndex: 100
+  },
+  toastMessage: {
+    flex: 1
+  },
+  toastUndo: {
+    background: "transparent",
+    border: "1px solid #fff",
+    color: "#fff",
+    padding: "4px 10px",
+    borderRadius: "12px",
+    fontSize: "12px",
+    fontWeight: 500,
+    cursor: "pointer"
   }
 }
 
