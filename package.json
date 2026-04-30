@@ -31,7 +31,8 @@
   "manifest": {
     "permissions": [
       "sidePanel",
-      "storage"
+      "storage",
+      "webNavigation"
     ],
     "host_permissions": [
       "https://www.linkedin.com/talent/*",
