@@ -448,6 +448,8 @@ function SidePanel() {
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null)
   const [jobAddResult, setJobAddResult] = useState<string>("")
   const [showJobModal, setShowJobModal] = useState(false)
+  const [mode, setMode] = useState<"sync" | "candidate">("sync")
+  const [candidateUrlId, setCandidateUrlId] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const pollPageInfo = useCallback(async () => {
@@ -526,26 +528,6 @@ function SidePanel() {
     }
   }, [])
 
-  useEffect(() => {
-    pollPageInfo()
-    pollRef.current = setInterval(pollPageInfo, 500)
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current)
-    }
-  }, [pollPageInfo])
-
-  useEffect(() => {
-    const onActivated = () => {
-      pollPageInfo()
-    }
-    chrome.tabs.onActivated.addListener(onActivated)
-    chrome.tabs.onUpdated.addListener(onActivated)
-    return () => {
-      chrome.tabs.onActivated.removeListener(onActivated)
-      chrome.tabs.onUpdated.removeListener(onActivated)
-    }
-  }, [pollPageInfo])
-
   const resetTransientState = useCallback(() => {
     setCandidates([])
     setLoadStatus("")
@@ -559,6 +541,74 @@ function SidePanel() {
     setSelectedJobId(null)
     setJobAddResult("")
     setShowJobModal(false)
+  }, [])
+
+  useEffect(() => {
+    if (mode === "candidate") {
+      // Candidate mode owns the sidepanel; pipeline polling is irrelevant
+      // and would contribute to LinkedIn-tab load. Clear any active interval.
+      if (pollRef.current) {
+        clearInterval(pollRef.current)
+        pollRef.current = null
+      }
+      // Wipe sync transient state — candidate mode wins absolutely (per spec).
+      resetTransientState()
+      setPageInfo(null)
+      setWorkflowState("not_on_pipeline")
+      return
+    }
+    // mode === "sync" — resume polling.
+    pollPageInfo()
+    pollRef.current = setInterval(pollPageInfo, 500)
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current)
+        pollRef.current = null
+      }
+    }
+  }, [mode, pollPageInfo, resetTransientState])
+
+  useEffect(() => {
+    const onActivated = () => {
+      pollPageInfo()
+    }
+    chrome.tabs.onActivated.addListener(onActivated)
+    chrome.tabs.onUpdated.addListener(onActivated)
+    return () => {
+      chrome.tabs.onActivated.removeListener(onActivated)
+      chrome.tabs.onUpdated.removeListener(onActivated)
+    }
+  }, [pollPageInfo])
+
+  useEffect(() => {
+    let cancelled = false
+
+    // Seed initial mode from active tab.
+    sendToBackground<unknown, { mode: "sync" | "candidate"; urlId: string | null; url: string }>({
+      name: "getActiveTabContext"
+    })
+      .then((ctx) => {
+        if (cancelled) return
+        if (ctx?.mode) {
+          setMode(ctx.mode)
+          setCandidateUrlId(ctx.urlId)
+        }
+      })
+      .catch(() => {})
+
+    // Subscribe to background broadcasts.
+    const listener = (message: any) => {
+      if (message?.type === "lr-mode-changed") {
+        setMode(message.mode)
+        setCandidateUrlId(message.urlId)
+      }
+    }
+    chrome.runtime.onMessage.addListener(listener)
+
+    return () => {
+      cancelled = true
+      chrome.runtime.onMessage.removeListener(listener)
+    }
   }, [])
 
   const handleSync = useCallback(async () => {
