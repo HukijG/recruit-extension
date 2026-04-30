@@ -2,9 +2,13 @@ import { sendToBackground } from "@plasmohq/messaging"
 import { Storage } from "@plasmohq/storage"
 import { useStorage } from "@plasmohq/storage/hook"
 import Papa from "papaparse"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 const localStore = new Storage({ area: "local" })
+
+// The activity `type` value the middleware uses for cold calls. Confirm with the
+// middleware-side agent and update this constant when finalized.
+const COLD_CALL_TYPE = "cold_call"
 
 // --- Types ---
 
@@ -1075,6 +1079,8 @@ function CandidateView({
     <div style={candidateStyles.container}>
       <p style={candidateStyles.candidateName}>{state.details.fullName}</p>
       <CandidatePhoneRow phoneNumber={state.details.phoneNumber} />
+      <CandidateJobBox job={state.details.job} />
+      <CandidateColdCallList activities={state.details.activities} />
     </div>
   )
 }
@@ -1095,6 +1101,98 @@ function CandidatePhoneRow({ phoneNumber }: { phoneNumber: string | null }) {
       </a>
     </div>
   )
+}
+
+function CandidateJobBox({ job }: { job: CandidateJob | null }) {
+  if (!job) {
+    return (
+      <div style={candidateStyles.jobBox}>
+        <p style={candidateStyles.jobPlaceholder}>Not on any active job</p>
+      </div>
+    )
+  }
+  return (
+    <div style={candidateStyles.jobBox}>
+      <p style={candidateStyles.jobTitle}>{job.title}</p>
+      <p style={candidateStyles.jobCompany}>{job.company}</p>
+      <span style={candidateStyles.jobStageChip}>{job.stage}</span>
+    </div>
+  )
+}
+
+function CandidateColdCallList({ activities }: { activities: CandidateActivity[] }) {
+  const coldCalls = useMemo(() => {
+    return activities
+      .filter((a) => a.type === COLD_CALL_TYPE)
+      .slice()
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  }, [activities])
+
+  const [expanded, setExpanded] = useState<Set<string | number>>(new Set())
+
+  const toggle = (id: string | number) => {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  if (coldCalls.length === 0) {
+    return (
+      <div style={candidateStyles.coldCallSection}>
+        <p style={candidateStyles.coldCallHeading}>Cold calls (0)</p>
+        <p style={candidateStyles.coldCallEmpty}>No cold calls yet</p>
+      </div>
+    )
+  }
+
+  return (
+    <div style={candidateStyles.coldCallSection}>
+      <p style={candidateStyles.coldCallHeading}>Cold calls ({coldCalls.length})</p>
+      {coldCalls.map((c, i) => {
+        const date = formatActivityDate(c.createdAt)
+        const isConnected = c.outcome === "connected"
+        const hasNotes = c.description.trim().length > 0
+        const canExpand = isConnected || hasNotes
+        const isExpanded = expanded.has(c.id)
+        return (
+          <div key={c.id} style={candidateStyles.coldCallRow}>
+            <div
+              style={{
+                ...candidateStyles.coldCallHeader,
+                cursor: canExpand ? "pointer" : "default"
+              }}
+              onClick={canExpand ? () => toggle(c.id) : undefined}>
+              <span style={candidateStyles.coldCallChevron}>
+                {canExpand ? (isExpanded ? "▾" : "▸") : "·"}
+              </span>
+              <span style={candidateStyles.coldCallLabel}>
+                Cold call {i + 1} — {date}
+              </span>
+              {isConnected && <span style={candidateStyles.coldCallConnected}>✓</span>}
+            </div>
+            {canExpand && isExpanded && (
+              <p style={candidateStyles.coldCallDescription}>
+                {hasNotes ? c.description : "(connected)"}
+              </p>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function formatActivityDate(iso: string): string {
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return iso
+  return d.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric"
+  })
 }
 
 const candidateStyles: Record<string, React.CSSProperties> = {
@@ -1139,6 +1237,96 @@ const candidateStyles: Record<string, React.CSSProperties> = {
     borderRadius: "20px",
     fontSize: "14px",
     fontWeight: 500
+  },
+  jobBox: {
+    width: "100%",
+    padding: "12px 14px",
+    backgroundColor: "#f8f9fa",
+    borderRadius: "8px",
+    border: "1px solid #e8e8e8",
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px"
+  },
+  jobTitle: {
+    margin: 0,
+    fontSize: "14px",
+    fontWeight: 600,
+    color: "#222"
+  },
+  jobCompany: {
+    margin: 0,
+    fontSize: "13px",
+    color: "#555"
+  },
+  jobStageChip: {
+    alignSelf: "flex-start",
+    fontSize: "11px",
+    padding: "2px 8px",
+    borderRadius: "10px",
+    backgroundColor: "#e8f0fe",
+    color: "#0a66c2",
+    fontWeight: 500,
+    marginTop: "4px"
+  },
+  jobPlaceholder: {
+    margin: 0,
+    fontSize: "13px",
+    color: "#888",
+    fontStyle: "italic"
+  },
+  coldCallSection: {
+    width: "100%",
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px"
+  },
+  coldCallHeading: {
+    margin: "0 0 4px 0",
+    fontSize: "12px",
+    fontWeight: 600,
+    color: "#555",
+    textTransform: "uppercase",
+    letterSpacing: "0.5px"
+  },
+  coldCallEmpty: {
+    margin: 0,
+    fontSize: "12px",
+    color: "#888",
+    fontStyle: "italic"
+  },
+  coldCallRow: {
+    padding: "6px 8px",
+    backgroundColor: "#fafafa",
+    borderRadius: "6px",
+    border: "1px solid #eee"
+  },
+  coldCallHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    fontSize: "13px",
+    color: "#333"
+  },
+  coldCallChevron: {
+    fontSize: "11px",
+    color: "#888",
+    width: "12px",
+    textAlign: "center"
+  },
+  coldCallLabel: {
+    flex: 1
+  },
+  coldCallConnected: {
+    color: "#27ae60",
+    fontWeight: 600
+  },
+  coldCallDescription: {
+    margin: "6px 0 0 20px",
+    fontSize: "12px",
+    color: "#555",
+    fontStyle: "italic",
+    lineHeight: "1.4"
   }
 }
 
