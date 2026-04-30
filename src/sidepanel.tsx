@@ -601,28 +601,23 @@ function SidePanel() {
       setWorkflowState("not_on_pipeline")
       return
     }
-    // mode === "sync" — resume polling.
+    // mode === "sync" — resume interval-based polling AND tab-event-driven polling.
     pollPageInfo()
     pollRef.current = setInterval(pollPageInfo, 500)
-    return () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current)
-        pollRef.current = null
-      }
-    }
-  }, [mode, pollPageInfo, resetTransientState])
-
-  useEffect(() => {
     const onActivated = () => {
       pollPageInfo()
     }
     chrome.tabs.onActivated.addListener(onActivated)
     chrome.tabs.onUpdated.addListener(onActivated)
     return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current)
+        pollRef.current = null
+      }
       chrome.tabs.onActivated.removeListener(onActivated)
       chrome.tabs.onUpdated.removeListener(onActivated)
     }
-  }, [pollPageInfo])
+  }, [mode, pollPageInfo, resetTransientState])
 
   useEffect(() => {
     let cancelled = false
@@ -727,8 +722,14 @@ function SidePanel() {
         body: { rfId, secret: extensionSecret }
       }).catch((err) => ({ ok: false, error: err?.message ?? "Network error" }))
 
+      // Track whether the response committed against the current candidate.
+      // Used below to decide whether to surface the error toast — a stale
+      // response (user navigated away during a deferred-POST timer) should
+      // not pop a red toast over the new candidate's view.
+      let committedToCurrent = false
       setCandidateState((prev) => {
         if (prev.phase !== "ready" || prev.urlId !== urlId) return prev
+        committedToCurrent = true
         if (resp?.ok) {
           return { ...prev, markInvalid: { status: "marked" } }
         }
@@ -738,7 +739,7 @@ function SidePanel() {
         }
       })
 
-      if (!resp?.ok) {
+      if (committedToCurrent && !resp?.ok) {
         setErrorToast(resp?.error ?? "Failed to mark invalid")
         // Auto-dismiss the error toast after 5s.
         setTimeout(() => setErrorToast(null), 5000)
