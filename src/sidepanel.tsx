@@ -1070,10 +1070,29 @@ function CandidateView({
     )
   }
 
-  // phase === "ready" — full UI added in Tasks 12-14.
+  // phase === "ready"
   return (
     <div style={candidateStyles.container}>
       <p style={candidateStyles.candidateName}>{state.details.fullName}</p>
+      <CandidatePhoneRow phoneNumber={state.details.phoneNumber} />
+    </div>
+  )
+}
+
+function CandidatePhoneRow({ phoneNumber }: { phoneNumber: string | null }) {
+  if (!phoneNumber) {
+    return (
+      <div style={candidateStyles.phoneRow}>
+        <span style={candidateStyles.phoneDisabled}>📞 No phone on file</span>
+      </div>
+    )
+  }
+  const dialUrl = `dialpad://${phoneNumber}?launchMinimode=1`
+  return (
+    <div style={candidateStyles.phoneRow}>
+      <a href={dialUrl} style={candidateStyles.phoneLink}>
+        📞 {phoneNumber}
+      </a>
     </div>
   )
 }
@@ -1091,6 +1110,35 @@ const candidateStyles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     color: "#222",
     textAlign: "center"
+  },
+  phoneRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "12px"
+  },
+  phoneLink: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "6px",
+    padding: "8px 16px",
+    backgroundColor: "#0a66c2",
+    color: "#fff",
+    borderRadius: "20px",
+    fontSize: "14px",
+    fontWeight: 500,
+    textDecoration: "none"
+  },
+  phoneDisabled: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "6px",
+    padding: "8px 16px",
+    backgroundColor: "#f0f0f0",
+    color: "#999",
+    borderRadius: "20px",
+    fontSize: "14px",
+    fontWeight: 500
   }
 }
 
