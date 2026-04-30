@@ -1,7 +1,5 @@
 import type { PlasmoMessaging } from "@plasmohq/messaging"
 
-const LOG_PREFIX = "[LR-Sync][Background]"
-
 const handler: PlasmoMessaging.MessageHandler = async (_req, res) => {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
   const tab = tabs[0]
@@ -16,8 +14,7 @@ const handler: PlasmoMessaging.MessageHandler = async (_req, res) => {
       type: "getPageInfo"
     })
     res.send(response)
-  } catch (err) {
-    console.warn(LOG_PREFIX, "getPageInfo relay failed:", err)
+  } catch {
     res.send({ isPipelinePage: false, totalOnPage: 0, checkedCount: 0 })
   }
 }

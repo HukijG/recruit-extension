@@ -1,13 +1,10 @@
 import type { PlasmoMessaging } from "@plasmohq/messaging"
 
-const LOG_PREFIX = "[LR-Sync][Background]"
-
 const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
   const tab = tabs[0]
 
   if (!tab?.id) {
-    console.error(LOG_PREFIX, "scrollToBottom: No active tab")
     res.send({ success: false, totalRowsLoaded: 0 })
     return
   }
@@ -18,8 +15,7 @@ const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
       targetCount: req.body?.targetCount ?? 25
     })
     res.send(response)
-  } catch (err) {
-    console.error(LOG_PREFIX, "scrollToBottom relay failed:", err)
+  } catch {
     res.send({ success: false, totalRowsLoaded: 0 })
   }
 }

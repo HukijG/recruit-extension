@@ -6,8 +6,6 @@ import { useCallback, useEffect, useRef, useState } from "react"
 
 const localStore = new Storage({ area: "local" })
 
-const LOG_PREFIX = "[LR-Sync][SidePanel]"
-
 // --- Types ---
 
 type WorkflowState =
@@ -142,21 +140,6 @@ function parseCsv(text: string): CsvRow[] {
     skipEmptyLines: true
   })
 
-  console.log(
-    LOG_PREFIX,
-    "CSV parsed:",
-    result.data.length,
-    "rows,",
-    result.errors.length,
-    "errors"
-  )
-  if (result.errors.length > 0) {
-    console.warn(LOG_PREFIX, "CSV parse errors:", result.errors)
-  }
-  if (result.data.length > 0) {
-    console.log(LOG_PREFIX, "CSV first row keys:", Object.keys(result.data[0]))
-  }
-
   return result.data.map((row) => ({
     firstName: (row["First Name"] ?? "").trim(),
     lastName: (row["Last Name"] ?? "").trim(),
@@ -224,8 +207,6 @@ function matchCandidates(
 
       const status: MatchStatus = nameMatch ? "matched" : "warning"
 
-      console.log(LOG_PREFIX, `Match: candidate[${i}] → CSV[${best.originalIndex}] (score: ${best.score}, ${status})`)
-
       matched.push({
         candidate: s,
         csv: best.csv,
@@ -236,7 +217,6 @@ function matchCandidates(
       })
     } else {
       // No match found
-      console.warn(LOG_PREFIX, `No CSV match for candidate[${i}]`)
       matched.push({
         candidate: s,
         csv: { firstName: "", lastName: "", currentCompany: "", profileUrl: "" },
@@ -247,11 +227,6 @@ function matchCandidates(
       })
     }
   }
-
-  const matchedCount = matched.filter((m) => m.status === "matched").length
-  const warningCount = matched.filter((m) => m.status === "warning").length
-  const errorCount = matched.filter((m) => m.status === "error").length
-  console.log(LOG_PREFIX, `Matching complete: ${matchedCount} matched, ${warningCount} warnings, ${errorCount} unmatched`)
 
   return matched
 }
@@ -279,7 +254,6 @@ async function sendCandidatesBatch(
   candidates: CandidatePayload[],
   secret?: string
 ): Promise<{ ok: boolean; data?: SendCandidatesResponse; error?: string }> {
-  console.log(LOG_PREFIX, `Sending batch of ${candidates.length} candidates via background`)
   try {
     const result = await sendToBackground({
       name: "sendCandidates",
@@ -288,7 +262,6 @@ async function sendCandidatesBatch(
     return result ?? { ok: false, error: "No response from background" }
   } catch (err: any) {
     const msg = err?.message ?? "Send failed"
-    console.error(LOG_PREFIX, `Batch send error:`, msg)
     return { ok: false, error: msg }
   }
 }
@@ -298,7 +271,6 @@ async function addCandidatesToJob(
   jobId: number,
   secret?: string
 ): Promise<{ ok: boolean; data?: AddToJobResponse; error?: string }> {
-  console.log(LOG_PREFIX, `Adding ${rfIds.length} candidates to job ${jobId} via background`)
   try {
     const result = await sendToBackground({
       name: "addToJob",
@@ -307,7 +279,6 @@ async function addCandidatesToJob(
     return result ?? { ok: false, error: "No response from background" }
   } catch (err: any) {
     const msg = err?.message ?? "Add to job failed"
-    console.error(LOG_PREFIX, `Add to job error:`, msg)
     return { ok: false, error: msg }
   }
 }
@@ -426,7 +397,6 @@ function SidePanel() {
   }, [])
 
   useEffect(() => {
-    console.log(LOG_PREFIX, "Starting page info polling")
     pollPageInfo()
     pollRef.current = setInterval(pollPageInfo, 500)
     return () => {
@@ -436,7 +406,6 @@ function SidePanel() {
 
   useEffect(() => {
     const onActivated = () => {
-      console.log(LOG_PREFIX, "Tab changed, polling immediately")
       pollPageInfo()
     }
     chrome.tabs.onActivated.addListener(onActivated)
@@ -463,7 +432,6 @@ function SidePanel() {
   }, [])
 
   const handleSync = useCallback(async () => {
-    console.log(LOG_PREFIX, "Sync started — clearing transient state")
     // Full reset of transient state so each sync starts from the same baseline
     // a fresh page+extension load gives us. extensionSecret is
     // useStorage-backed and intentionally preserved.
@@ -478,7 +446,6 @@ function SidePanel() {
     } catch {}
     const info = freshPageInfo ?? pageInfo
     const targetCount = info?.totalOnPage || info?.checkedCount || 25
-    console.log(LOG_PREFIX, "Scroll target count:", targetCount, "(totalOnPage:", info?.totalOnPage, "checkedCount:", info?.checkedCount, ")")
 
     const scrollResult = await sendToBackground({
       name: "scrollToBottom",
@@ -486,17 +453,11 @@ function SidePanel() {
     })
 
     if (!scrollResult?.success) {
-      console.error(LOG_PREFIX, "scrollToBottom failed:", scrollResult)
       setLoadStatus("Failed to scroll page. Try again.")
       setWorkflowState("profiles_selected")
       return
     }
 
-    console.log(
-      LOG_PREFIX,
-      "Scroll complete. Rows loaded:",
-      scrollResult.totalRowsLoaded
-    )
     setLoadStatus("Extracting candidate data...")
 
     const loadResult = await sendToBackground({
@@ -504,18 +465,10 @@ function SidePanel() {
     })
 
     if (!loadResult) {
-      console.error(LOG_PREFIX, "getSelectedCandidates failed")
       setLoadStatus("Failed to extract candidates. Try again.")
       setWorkflowState("profiles_selected")
       return
     }
-
-    console.log(
-      LOG_PREFIX,
-      "Sync complete.",
-      loadResult.count,
-      "candidates ready"
-    )
 
     setCandidates(loadResult.candidates)
     setLoadStatus(
@@ -528,7 +481,6 @@ function SidePanel() {
     (file: File) => {
       setCsvError("")
       setCsvFileName(file.name)
-      console.log(LOG_PREFIX, "CSV file selected:", file.name)
 
       const reader = new FileReader()
       reader.onload = (e) => {
@@ -539,7 +491,6 @@ function SidePanel() {
         }
 
         const csvRows = parseCsv(text)
-        console.log(LOG_PREFIX, "CSV rows:", csvRows.length, "Candidates:", candidates.length)
 
         if (csvRows.length < candidates.length) {
           setCsvError(
@@ -550,16 +501,6 @@ function SidePanel() {
         const matched = matchCandidates(candidates, csvRows)
         setMatchedCandidates(matched)
         setWorkflowState("csv_matched")
-
-        const warnings = matched.filter((m) => m.status === "warning").length
-        console.log(
-          LOG_PREFIX,
-          "Matching complete.",
-          matched.length,
-          "pairs,",
-          warnings,
-          "warnings"
-        )
       }
       reader.readAsText(file)
     },
@@ -578,7 +519,6 @@ function SidePanel() {
     const toSend = matchedCandidates.filter((m) => m.checked)
     if (toSend.length === 0) return
 
-    console.log(LOG_PREFIX, `Sending batch of ${toSend.length} candidates`)
     setWorkflowState("sending")
     setCandidateResults([])
     setJobs([])
@@ -598,7 +538,6 @@ function SidePanel() {
     }
 
     const { data } = result
-    console.log(LOG_PREFIX, `Created: ${data.created}, Updated: ${data.updated}, Skipped: ${data.skipped}, Errors: ${data.errors}`)
 
     setCandidateResults(data.results)
     setJobs(data.jobs)
@@ -622,7 +561,6 @@ function SidePanel() {
     if (!selectedJobId || rfIds.length === 0) return
 
     const job = jobs.find((j) => j.id === selectedJobId)
-    console.log(LOG_PREFIX, `Adding ${rfIds.length} candidates to job ${selectedJobId} (${job?.name})`)
     setWorkflowState("adding_to_job")
     setJobAddResult("")
 
@@ -635,12 +573,6 @@ function SidePanel() {
     }
 
     const { data } = result
-    console.log(LOG_PREFIX, "Add to job response: counts only", {
-      added: data.added,
-      alreadyInJob: data.alreadyInJob,
-      errors: data.errors,
-      resultsCount: data.results?.length ?? 0
-    })
     // Derive from results array if available, otherwise fall back to top-level counts
     const added = data.results?.length
       ? data.results.filter((r) => r.status === "added").length
@@ -651,7 +583,6 @@ function SidePanel() {
     const errors = data.results?.length
       ? data.results.filter((r) => r.status === "error").length
       : (data.errors ?? 0)
-    console.log(LOG_PREFIX, `Added: ${added}, Already in job: ${alreadyInJob}, Errors: ${errors}`)
     const jobName = job?.name ?? "job"
     const parts: string[] = []
     if (added) parts.push(`${added} added to ${jobName}`)
@@ -707,10 +638,6 @@ function SidePanel() {
             error={csvError}
           />
           <CandidateList candidates={candidates} />
-          <DebugJsonView
-            label="candidate data"
-            data={candidates}
-          />
         </>
       )}
 
@@ -731,20 +658,6 @@ function SidePanel() {
             }}>
             Send {checkedCount} Candidate{checkedCount !== 1 ? "s" : ""}
           </button>
-          <DebugJsonView
-            label="match debug"
-            data={matchedCandidates.map((m, i) => ({
-              index: i,
-              candidateName: m.normalizedCandidate,
-              csvName: m.normalizedCsv,
-              status: m.status,
-              profileUrl: m.csv.profileUrl
-            }))}
-          />
-          <DebugJsonView
-            label="full matched data"
-            data={matchedCandidates}
-          />
         </>
       )}
 
@@ -1532,23 +1445,6 @@ function CandidateList({ candidates }: { candidates: Candidate[] }) {
   )
 }
 
-// --- Debug JSON View ---
-
-function DebugJsonView({ label, data }: { label: string; data: any }) {
-  const [isOpen, setIsOpen] = useState(false)
-
-  return (
-    <div style={styles.debugContainer}>
-      <button onClick={() => setIsOpen(!isOpen)} style={styles.debugToggle}>
-        {isOpen ? "Hide" : "Show"} {label} (JSON)
-      </button>
-      {isOpen && (
-        <pre style={styles.debugPre}>{JSON.stringify(data, null, 2)}</pre>
-      )}
-    </div>
-  )
-}
-
 // --- Styles ---
 
 const styles: Record<string, React.CSSProperties> = {
@@ -1761,32 +1657,6 @@ const styles: Record<string, React.CSSProperties> = {
   metaText: {
     fontSize: "10px",
     color: "#888"
-  },
-  debugContainer: {
-    width: "100%",
-    marginTop: "8px"
-  },
-  debugToggle: {
-    background: "none",
-    border: "1px solid #ddd",
-    borderRadius: "6px",
-    padding: "6px 12px",
-    fontSize: "11px",
-    color: "#666",
-    cursor: "pointer",
-    width: "100%"
-  },
-  debugPre: {
-    marginTop: "8px",
-    padding: "10px",
-    backgroundColor: "#1e1e1e",
-    color: "#d4d4d4",
-    borderRadius: "6px",
-    fontSize: "10px",
-    overflow: "auto",
-    maxHeight: "400px",
-    whiteSpace: "pre-wrap" as const,
-    wordBreak: "break-all" as const
   },
   inputLabel: {
     display: "block",

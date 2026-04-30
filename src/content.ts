@@ -4,10 +4,6 @@ export const config: PlasmoCSConfig = {
   matches: ["https://www.linkedin.com/talent/*"]
 }
 
-const LOG_PREFIX = "[LR-Sync][Content]"
-
-console.log(LOG_PREFIX, "Content script loaded on:", window.location.href)
-
 // --- Types ---
 
 interface GetPageInfoResponse {
@@ -116,7 +112,6 @@ async function scrollToLoadAllProfiles(
   )
 
   if (rows.length === 0) {
-    console.warn(LOG_PREFIX, "scrollToLoadAllProfiles: No profile rows found")
     return { success: false, totalRowsLoaded: 0 }
   }
 
@@ -127,15 +122,6 @@ async function scrollToLoadAllProfiles(
 
   // Never try to populate more rows than actually exist in the DOM
   const effectiveTarget = Math.min(targetCount, rows.length)
-
-  console.log(
-    LOG_PREFIX,
-    "scrollToLoadAllProfiles: Starting.",
-    "Total shells:", rows.length,
-    "Requested target:", targetCount,
-    "Effective target:", effectiveTarget,
-    "Initial populated:", countPopulatedRows()
-  )
 
   // Always run the loop — it exits at iter 0 if everything's already populated.
   // The prior "skip if alreadyPopulated >= target" shortcut would falsely fire
@@ -152,15 +138,6 @@ async function scrollToLoadAllProfiles(
     if (populated === lastPopulated) {
       stalls++
       if (stalls >= STALL_LIMIT) {
-        console.log(
-          LOG_PREFIX,
-          "scrollToLoadAllProfiles: Stalled after",
-          stalls,
-          "iterations with no new rows. Populated:",
-          populated,
-          "of",
-          effectiveTarget
-        )
         break
       }
     } else {
@@ -177,12 +154,6 @@ async function scrollToLoadAllProfiles(
   await sleep(300)
 
   const finalCount = countPopulatedRows()
-  console.log(
-    LOG_PREFIX,
-    "scrollToLoadAllProfiles: Done. Populated:",
-    finalCount, "of", effectiveTarget
-  )
-
   return { success: finalCount >= effectiveTarget, totalRowsLoaded: finalCount }
 }
 
@@ -361,7 +332,6 @@ function parseEducationEntries(container: Element): EducationEntry[] {
 function captureCandidate(li: Element): Candidate | null {
   const row = li.querySelector(".standard-profile-row")
   if (!row) {
-    console.warn(LOG_PREFIX, "captureCandidate: No .standard-profile-row found")
     return null
   }
 
@@ -393,12 +363,6 @@ function captureCandidate(li: Element): Candidate | null {
     education
   }
 
-  console.log(LOG_PREFIX, "Captured candidate", {
-    experienceCount: experience.length,
-    totalExperienceCount,
-    educationCount: education.length
-  })
-
   return candidate
 }
 
@@ -406,8 +370,6 @@ function getSelectedCandidates(): GetSelectedCandidatesResponse {
   const allRows = document.querySelectorAll(
     "li[data-test-paginated-profile-list-item-container]"
   )
-
-  console.log(LOG_PREFIX, "getSelectedCandidates: Total rows in DOM:", allRows.length)
 
   const candidates: Candidate[] = []
 
@@ -423,19 +385,10 @@ function getSelectedCandidates(): GetSelectedCandidatesResponse {
     }
   }
 
-  console.log(
-    LOG_PREFIX,
-    "getSelectedCandidates: captured",
-    candidates.length,
-    "selected candidates"
-  )
-
   return { candidates, count: candidates.length }
 }
 
 // --- Message listener ---
-
-let lastLoggedResponse = ""
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "getPageInfo") {
@@ -449,19 +402,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       checkedCount: checked
     }
 
-    const responseKey = JSON.stringify(response)
-    if (responseKey !== lastLoggedResponse) {
-      console.log(LOG_PREFIX, "getPageInfo:", response)
-      lastLoggedResponse = responseKey
-    }
-
     sendResponse(response)
     return true
   }
 
   if (message.type === "scrollToBottom") {
     const targetCount = message.targetCount ?? 25
-    console.log(LOG_PREFIX, "scrollToLoadAllProfiles: Received request, target:", targetCount)
     scrollToLoadAllProfiles(targetCount).then((response) => {
       sendResponse(response)
     })
@@ -469,7 +415,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === "getSelectedCandidates") {
-    console.log(LOG_PREFIX, "getSelectedCandidates: Received request")
     const response = getSelectedCandidates()
     sendResponse(response)
     return true
