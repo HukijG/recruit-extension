@@ -1,4 +1,5 @@
 import type { PlasmoMessaging } from "@plasmohq/messaging"
+import { Storage } from "@plasmohq/storage"
 
 const MIDDLEWARE_URL = process.env.PLASMO_PUBLIC_MIDDLEWARE_URL
 
@@ -15,6 +16,10 @@ const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
     return
   }
 
+  const localStore = new Storage({ area: "local" })
+  const consultantFirstName =
+    (await localStore.get<string>("consultantFirstName")) ?? ""
+
   const url = `${MIDDLEWARE_URL.replace(/\/+$/, "")}/candidates/add-to-job`
 
   const headers: Record<string, string> = { "Content-Type": "application/json" }
@@ -24,7 +29,7 @@ const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
     const resp = await fetch(url, {
       method: "POST",
       headers,
-      body: JSON.stringify({ rfIds, jobId })
+      body: JSON.stringify({ consultantFirstName, rfIds, jobId })
     })
 
     if (!resp.ok) {
