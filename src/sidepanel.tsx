@@ -1742,7 +1742,7 @@ function StatusDisplay({
 
   if (state === "no_selection") {
     return (
-      <div style={styles.statusCentered}>
+      <div style={{ ...styles.statusCentered, marginTop: "70px" }}>
         <div style={styles.statusIcon}>
           <svg
             width="48"
@@ -1798,7 +1798,7 @@ function StatusDisplay({
 
   if (state === "profiles_selected") {
     return (
-      <div style={styles.statusCentered}>
+      <div style={{ ...styles.statusCentered, marginTop: "70px" }}>
         <div style={styles.statusIcon}>
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#27ae60" strokeWidth="1.5">
             <path d="M22 11.08V12a10 10 0 11-5.93-9.14" strokeLinecap="round" />
@@ -2473,7 +2473,7 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     textAlign: "center",
     gap: "10px",
-    marginTop: "32px",
+    marginTop: "62px",
     padding: "0 12px",
     width: "100%",
     animation: "fade-up 0.35s ease-out"
@@ -2642,7 +2642,7 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: "1.4"
   },
   syncButton: {
-    padding: "10px 20px",
+    padding: "10px 10px",
     backgroundColor: "#0a66c2",
     color: "white",
     border: "none",
