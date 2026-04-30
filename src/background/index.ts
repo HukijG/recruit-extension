@@ -1,5 +1,7 @@
 import { Storage } from "@plasmohq/storage"
 
+import { parseLinkedInTalentUrl } from "~lib/url"
+
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
 
 // One-shot migration: copy any existing extensionSecret from chrome.storage.sync
@@ -35,6 +37,83 @@ async function migrateSyncToLocal() {
 chrome.runtime.onInstalled.addListener(async (details) => {
   if (details.reason !== "install" && details.reason !== "update") return
   await migrateSyncToLocal()
+})
+
+// --- URL watcher: drives sidepanel mode ---
+//
+// Sends a `lr-mode-changed` runtime message whenever the active tab's URL
+// transitions between sync and candidate modes (or between candidate URLs).
+// Sidepanel listens; if it isn't open, the message is harmless (silent failure).
+
+interface ModeBroadcast {
+  type: "lr-mode-changed"
+  mode: "sync" | "candidate"
+  urlId: string | null
+  url: string
+  tabId: number
+}
+
+let lastBroadcast: {
+  mode: "sync" | "candidate"
+  urlId: string | null
+  tabId: number | null
+} = {
+  mode: "sync",
+  urlId: null,
+  tabId: null
+}
+
+async function checkActiveTabAndBroadcast() {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
+    const tab = tabs[0]
+    const url = tab?.url ?? ""
+    const tabId = tab?.id ?? -1
+    const parsed = parseLinkedInTalentUrl(url)
+
+    if (
+      lastBroadcast.mode === parsed.mode &&
+      lastBroadcast.urlId === parsed.urlId &&
+      lastBroadcast.tabId === tabId
+    ) {
+      return
+    }
+
+    lastBroadcast = { mode: parsed.mode, urlId: parsed.urlId, tabId }
+
+    const message: ModeBroadcast = {
+      type: "lr-mode-changed",
+      mode: parsed.mode,
+      urlId: parsed.urlId,
+      url,
+      tabId
+    }
+    // sendMessage rejects if no listener is open; we don't care.
+    chrome.runtime.sendMessage(message).catch(() => {})
+  } catch {
+    // Non-fatal — sidepanel will seed initial state on mount via getActiveTabContext.
+  }
+}
+
+// SPA pushState — primary signal. Filtered to the LinkedIn talent host so we
+// don't get spammed by every site's history changes.
+chrome.webNavigation.onHistoryStateUpdated.addListener(
+  () => {
+    checkActiveTabAndBroadcast()
+  },
+  { url: [{ hostEquals: "www.linkedin.com", pathPrefix: "/talent/" }] }
+)
+
+// Full-page navigation backstop.
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
+  if (changeInfo.url || changeInfo.status === "complete") {
+    checkActiveTabAndBroadcast()
+  }
+})
+
+// Tab switch backstop.
+chrome.tabs.onActivated.addListener(() => {
+  checkActiveTabAndBroadcast()
 })
 
 export {}
