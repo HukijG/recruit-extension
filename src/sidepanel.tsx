@@ -325,7 +325,7 @@ async function addCandidatesToJob(
   }
 }
 
-// --- Inject keyframe animations ---
+// --- Inject keyframe animations and class-based selectors ---
 
 const sidepanelStyle = document.createElement("style")
 sidepanelStyle.textContent = `
@@ -341,29 +341,85 @@ sidepanelStyle.textContent = `
     from { opacity: 0; transform: translateY(6px); }
     to { opacity: 1; transform: translateY(0); }
   }
+
+  /* ----- Animated "select profiles" checkbox ----- */
+
+  @keyframes lr-box-pulse {
+    0%, 50% {
+      fill-opacity: 0;
+      transform: scale(1);
+    }
+    54% {
+      fill-opacity: 0;
+      transform: scale(0.9);
+    }
+    58% {
+      fill-opacity: 1;
+      transform: scale(0.9);
+    }
+    64% {
+      fill-opacity: 1;
+      transform: scale(1);
+    }
+    86% {
+      fill-opacity: 1;
+      transform: scale(1);
+    }
+    92%, 100% {
+      fill-opacity: 0;
+      transform: scale(1);
+    }
+  }
+
+  @keyframes lr-check-draw {
+    0%, 56%   { stroke-dashoffset: 30; }
+    66%, 86%  { stroke-dashoffset: 0; }
+    92%, 100% { stroke-dashoffset: 30; }
+  }
+
+  @keyframes lr-spark-fly {
+    0%, 60% { opacity: 0; transform: translateY(0); }
+    66%     { opacity: 1; transform: translateY(-3px); }
+    78%     { opacity: 0; transform: translateY(-11px); }
+    100%    { opacity: 0; transform: translateY(-11px); }
+  }
+
+  .lr-checkbox-rect {
+    fill: #0a66c2;
+    fill-opacity: 0;
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: lr-box-pulse 4s ease-in-out infinite;
+  }
+
+  .lr-checkmark-path {
+    stroke: #ffffff;
+    stroke-dasharray: 30;
+    stroke-dashoffset: 30;
+    animation: lr-check-draw 4s ease-in-out infinite;
+  }
+
+  /* Each spark line lives inside a parent <g transform="rotate(X)"> for static
+     radial positioning. CSS translateY then animates outward along the parent
+     group's rotated y-axis — no transform-origin gymnastics required. */
+  .lr-spark {
+    opacity: 0;
+    animation: lr-spark-fly 4s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .lr-checkbox-rect,
+    .lr-checkmark-path,
+    .lr-spark {
+      animation: none;
+    }
+    .lr-checkbox-rect { fill-opacity: 0; }
+    .lr-checkmark-path { stroke-dashoffset: 0; }
+  }
 `
 if (!document.querySelector("[data-lr-sync-styles]")) {
   sidepanelStyle.setAttribute("data-lr-sync-styles", "")
   document.head.appendChild(sidepanelStyle)
-}
-
-// --- Pencil glyph used by the editable name heading ---
-
-function PencilIcon({ size = 18 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round">
-      <path d="M12 20h9" />
-      <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-    </svg>
-  )
 }
 
 // --- Greeting heading with inline editable name ---
@@ -377,7 +433,6 @@ function EditableNameHeading({
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState("")
-  const [hover, setHover] = useState(false)
   const [nameHover, setNameHover] = useState(false)
   const [inputFocus, setInputFocus] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -433,10 +488,7 @@ function EditableNameHeading({
   }
 
   return (
-    <h1
-      style={styles.greetingTitle}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}>
+    <h1 style={styles.greetingTitle}>
       <span>Hi, </span>
       <span
         onClick={startEdit}
@@ -444,30 +496,12 @@ function EditableNameHeading({
         onMouseLeave={() => setNameHover(false)}
         style={{
           ...styles.greetingName,
-          backgroundColor: nameHover ? "#d3e3f7" : "#e8f0fe"
+          backgroundColor: nameHover ? "#c5d8f1" : "#e8f0fe"
         }}
         title="Click to edit your name">
         {name}
       </span>
       <span>!</span>
-      <span
-        role="button"
-        aria-label="Edit name"
-        tabIndex={0}
-        onClick={startEdit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault()
-            startEdit()
-          }
-        }}
-        style={{
-          ...styles.greetingEditIcon,
-          opacity: hover ? 1 : 0,
-          transform: hover ? "translateY(0)" : "translateY(-2px)"
-        }}>
-        <PencilIcon />
-      </span>
     </h1>
   )
 }
@@ -503,8 +537,7 @@ function NameSetupGreeting({
         Welcome <span style={styles.welcomeAccent}>aboard</span>
       </h1>
       <p style={styles.greetingBody}>
-        Tell us your first name so the candidates you sync get attributed to{" "}
-        <em style={styles.greetingEmphasis}>you</em> in Recruiterflow.
+        Tell us your first name so the candidates you sync get attributed to{" "}you in <em style={styles.greetingEmphasis}>Recruiterflow.</em>
       </p>
       <div style={styles.nameSetupRow}>
         <input
@@ -718,7 +751,7 @@ function SidePanel() {
           setCandidateUrlId(ctx.urlId)
         }
       })
-      .catch(() => {})
+      .catch(() => { })
 
     // Subscribe to background broadcasts.
     const listener = (message: any) => {
@@ -876,7 +909,7 @@ function SidePanel() {
     let freshPageInfo: PageInfo | null = null
     try {
       freshPageInfo = await sendToBackground<any, PageInfo>({ name: "getPageInfo" })
-    } catch {}
+    } catch { }
     const info = freshPageInfo ?? pageInfo
     const targetCount = info?.totalOnPage || info?.checkedCount || 25
 
@@ -1700,11 +1733,8 @@ function StatusDisplay({
         <span style={styles.wave} aria-hidden="true">👋</span>
         <EditableNameHeading name={trimmedName} onChange={setName} />
         <p style={styles.greetingBody}>
-          Pop open a LinkedIn Recruiter pipeline and the extension will spring
-          to life.
-        </p>
-        <p style={styles.greetingSubtle}>
-          It activates the moment it detects a pipeline view.
+          Open a LinkedIn Recruiter project to sync profiles to{" "}
+          <em style={styles.greetingEmphasis}>Recruiterflow</em>.
         </p>
       </div>
     )
@@ -1714,9 +1744,51 @@ function StatusDisplay({
     return (
       <div style={styles.statusCentered}>
         <div style={styles.statusIcon}>
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#0a66c2" strokeWidth="1.5">
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <path d="M9 12l2 2 4-4" strokeLinecap="round" strokeLinejoin="round" />
+          <svg
+            width="48"
+            height="48"
+            viewBox="0 0 48 48"
+            fill="none"
+            stroke="#0a66c2"
+            strokeWidth="1.5"
+            overflow="visible">
+            {/* sparks layer — anchored at the box centre, each rotated to its angle */}
+            <g transform="translate(24, 24)">
+              {[0, 45, 90, 135, 180, 225, 270, 315].map((angle) => (
+                <g key={angle} transform={`rotate(${angle})`}>
+                  <line
+                    className="lr-spark"
+                    x1="0"
+                    y1="-15"
+                    x2="0"
+                    y2="-21"
+                    stroke="#0a66c2"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                  />
+                </g>
+              ))}
+            </g>
+            {/* checkbox + checkmark, top-left of box at (12, 12) */}
+            <g transform="translate(12, 12)">
+              <rect
+                className="lr-checkbox-rect"
+                x="0"
+                y="0"
+                width="24"
+                height="24"
+                rx="4"
+              />
+              <path
+                className="lr-checkmark-path"
+                d="M5.5 12.5 L10 17 L19 7"
+                fill="none"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                pathLength="30"
+              />
+            </g>
           </svg>
         </div>
         <p style={styles.statusText}>Select profiles to sync</p>
@@ -1993,24 +2065,24 @@ function CandidateResultsList({ results }: { results: CandidateResult[] }) {
       {results.map((r, i) => {
         const bg =
           r.status === "created" ? "#f0faf0" :
-          r.status === "updated" ? "#e8f4fd" :
-          r.status === "skipped" ? "#fff8e1" :
-          "#ffebee"
+            r.status === "updated" ? "#e8f4fd" :
+              r.status === "skipped" ? "#fff8e1" :
+                "#ffebee"
         const icon =
           r.status === "created" ? "✓" :
-          r.status === "updated" ? "↻" :
-          r.status === "skipped" ? "↷" :
-          "✗"
+            r.status === "updated" ? "↻" :
+              r.status === "skipped" ? "↷" :
+                "✗"
         const color =
           r.status === "created" ? "#27ae60" :
-          r.status === "updated" ? "#0a66c2" :
-          r.status === "skipped" ? "#f39c12" :
-          "#e74c3c"
+            r.status === "updated" ? "#0a66c2" :
+              r.status === "skipped" ? "#f39c12" :
+                "#e74c3c"
         const detail =
           r.status === "updated" ? "updated" :
-          r.status === "skipped" ? "already exists" :
-          r.status === "error" ? (r.reason ?? "error") :
-          ""
+            r.status === "skipped" ? "already exists" :
+              r.status === "error" ? (r.reason ?? "error") :
+                ""
 
         return (
           <div
@@ -2055,9 +2127,9 @@ function JobDropdown({
 
   const filtered = search
     ? jobs.filter((j) => {
-        const q = search.toLowerCase()
-        return j.name.toLowerCase().includes(q) || j.company.toLowerCase().includes(q)
-      })
+      const q = search.toLowerCase()
+      return j.name.toLowerCase().includes(q) || j.company.toLowerCase().includes(q)
+    })
     : jobs
 
   return (
@@ -2198,9 +2270,9 @@ function JobModal({
 
   const filtered = search
     ? jobs.filter((j) => {
-        const q = search.toLowerCase()
-        return j.name.toLowerCase().includes(q) || j.company.toLowerCase().includes(q)
-      })
+      const q = search.toLowerCase()
+      return j.name.toLowerCase().includes(q) || j.company.toLowerCase().includes(q)
+    })
     : jobs
 
   return (
@@ -2450,28 +2522,28 @@ const styles: Record<string, React.CSSProperties> = {
   },
   greetingBody: {
     fontSize: "13.5px",
-    color: "#3c3c3c",
+    color: "#0e0d0d",
     lineHeight: 1.55,
     margin: "2px 0 0 0",
     maxWidth: "280px"
   },
   greetingSubtle: {
-    fontSize: "12px",
-    color: "#8a8a8a",
+    fontSize: "14px",
+    color: "#1b1b1b",
     lineHeight: 1.55,
     margin: 0,
     maxWidth: "260px",
     fontStyle: "italic"
   },
   greetingEmphasis: {
-    color: "#0a66c2",
+    color: "#0d82f7",
     fontStyle: "normal",
     fontWeight: 600
   },
   greetingHint: {
-    fontSize: "11px",
-    color: "#9aa1a8",
-    margin: "8px 0 0 0",
+    fontSize: "14px",
+    color: "#2e2f30",
+    margin: "14px 0 0 0",
     letterSpacing: "0.01em"
   },
   greetingName: {
