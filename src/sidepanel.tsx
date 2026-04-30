@@ -121,6 +121,44 @@ interface AddToJobResponse {
   results: { rfId: number; status: string; reason?: string }[]
 }
 
+// --- Candidate-mode types ---
+
+interface CandidateActivity {
+  id: string | number
+  type: string
+  name: string
+  description: string
+  createdAt: string
+  outcome: string | null
+}
+
+interface CandidateJob {
+  title: string
+  company: string
+  stage: string
+}
+
+interface CandidateDetails {
+  rfId: number
+  fullName: string
+  phoneNumber: string | null
+  job: CandidateJob | null
+  activities: CandidateActivity[]
+}
+
+type MarkInvalidState =
+  | { status: "idle" }
+  | { status: "armed"; undoExpiresAt: number }
+  | { status: "submitting" }
+  | { status: "marked" }
+  | { status: "error"; message: string }
+
+type CandidateState =
+  | { phase: "idle" }
+  | { phase: "loading"; urlId: string }
+  | { phase: "ready"; urlId: string; details: CandidateDetails; markInvalid: MarkInvalidState }
+  | { phase: "error"; urlId: string; message: string }
+
 // --- Normalization ---
 
 function normalize(s: string): string {
@@ -450,6 +488,8 @@ function SidePanel() {
   const [showJobModal, setShowJobModal] = useState(false)
   const [mode, setMode] = useState<"sync" | "candidate">("sync")
   const [candidateUrlId, setCandidateUrlId] = useState<string | null>(null)
+  const [candidateState, setCandidateState] = useState<CandidateState>({ phase: "idle" })
+  const requestTokenRef = useRef(0)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const pollPageInfo = useCallback(async () => {
@@ -610,6 +650,62 @@ function SidePanel() {
       chrome.runtime.onMessage.removeListener(listener)
     }
   }, [])
+
+  const fetchCandidate = useCallback(
+    async (urlId: string) => {
+      const token = ++requestTokenRef.current
+      setCandidateState({ phase: "loading", urlId })
+
+      const urlResp = await sendToBackground<unknown, { profileUrl: string | null }>({
+        name: "getCandidateProfileUrl"
+      }).catch(() => ({ profileUrl: null }))
+
+      if (token !== requestTokenRef.current) return
+
+      if (!urlResp?.profileUrl) {
+        setCandidateState({
+          phase: "error",
+          urlId,
+          message: "Could not read profile URL from page"
+        })
+        return
+      }
+
+      const resp = await sendToBackground<any, { ok: boolean; data?: CandidateDetails; error?: string }>({
+        name: "fetchCandidateDetails",
+        body: { profileUrl: urlResp.profileUrl, secret: extensionSecret }
+      }).catch((err): { ok: boolean; data?: CandidateDetails; error?: string } => ({ ok: false, error: err?.message ?? "Network error" }))
+
+      if (token !== requestTokenRef.current) return
+
+      if (!resp?.ok || !resp.data) {
+        setCandidateState({
+          phase: "error",
+          urlId,
+          message: resp?.error ?? "Failed to fetch candidate"
+        })
+        return
+      }
+
+      setCandidateState({
+        phase: "ready",
+        urlId,
+        details: resp.data,
+        markInvalid: { status: "idle" }
+      })
+    },
+    [extensionSecret]
+  )
+
+  useEffect(() => {
+    if (mode === "candidate" && candidateUrlId) {
+      fetchCandidate(candidateUrlId)
+    } else {
+      // Mode flipped away from candidate — drop any in-flight work and clear UI.
+      requestTokenRef.current++
+      setCandidateState({ phase: "idle" })
+    }
+  }, [mode, candidateUrlId, fetchCandidate])
 
   const handleSync = useCallback(async () => {
     // Full reset of transient state so each sync starts from the same baseline
@@ -790,140 +886,212 @@ function SidePanel() {
   return (
     <div style={styles.container}>
       <ConsultantNameHeader />
-      {showResetButton && (
-        <div style={styles.resetBar}>
-          <button onClick={handleReset} style={styles.resetButton} title="Clear all extension state and start over">
-            Reset
-          </button>
-        </div>
-      )}
-      <StatusDisplay
-        state={workflowState}
-        pageInfo={pageInfo}
-        loadStatus={loadStatus}
-        count={candidates.length}
-      />
 
-      {workflowState === "profiles_selected" && (
-        <button onClick={handleSync} style={styles.syncButton}>
-          Sync {pageInfo?.checkedCount} Selected Profile
-          {pageInfo?.checkedCount !== 1 ? "s" : ""}
-        </button>
+      {mode === "candidate" && (
+        <CandidateView
+          state={candidateState}
+          onRetry={() => candidateUrlId && fetchCandidate(candidateUrlId)}
+        />
       )}
 
-      {workflowState === "ready" && candidates.length > 0 && (
+      {mode === "sync" && (
         <>
-          <CsvDropZone
-            onFile={handleCsvFile}
-            fileName={csvFileName}
-            error={csvError}
-          />
-          <CandidateList candidates={candidates} />
-        </>
-      )}
-
-      {workflowState === "csv_matched" && matchedCandidates.length > 0 && (
-        <>
-          <AuthSecretInput secret={extensionSecret} onSecretChange={setExtensionSecret} />
-          <ReviewTable
-            matched={matchedCandidates}
-            onToggle={toggleCandidate}
-          />
-          <button
-            onClick={handleSend}
-            disabled={!canSend}
-            style={{
-              ...styles.syncButton,
-              backgroundColor: canSend ? "#27ae60" : "#ccc",
-              cursor: canSend ? "pointer" : "not-allowed"
-            }}>
-            Send {checkedCount} Candidate{checkedCount !== 1 ? "s" : ""}
-          </button>
-        </>
-      )}
-
-      {workflowState === "sending" && (
-        <div style={styles.statusCentered}>
-          <div style={styles.spinner} />
-          <p style={styles.statusText}>{sendProgress}</p>
-        </div>
-      )}
-
-      {workflowState === "complete" && (
-        <>
-          <p style={{ ...styles.statusText, textAlign: "center" }}>{sendProgress}</p>
-          {candidateResults.length > 0 && (
-            <CandidateResultsList results={candidateResults} />
+          {showResetButton && (
+            <div style={styles.resetBar}>
+              <button onClick={handleReset} style={styles.resetButton} title="Clear all extension state and start over">
+                Reset
+              </button>
+            </div>
           )}
-          {candidateResults.length === 0 && (
+          <StatusDisplay
+            state={workflowState}
+            pageInfo={pageInfo}
+            loadStatus={loadStatus}
+            count={candidates.length}
+          />
+
+          {workflowState === "profiles_selected" && (
+            <button onClick={handleSync} style={styles.syncButton}>
+              Sync {pageInfo?.checkedCount} Selected Profile
+              {pageInfo?.checkedCount !== 1 ? "s" : ""}
+            </button>
+          )}
+
+          {workflowState === "ready" && candidates.length > 0 && (
             <>
+              <CsvDropZone
+                onFile={handleCsvFile}
+                fileName={csvFileName}
+                error={csvError}
+              />
+              <CandidateList candidates={candidates} />
+            </>
+          )}
+
+          {workflowState === "csv_matched" && matchedCandidates.length > 0 && (
+            <>
+              <AuthSecretInput secret={extensionSecret} onSecretChange={setExtensionSecret} />
+              <ReviewTable
+                matched={matchedCandidates}
+                onToggle={toggleCandidate}
+              />
               <button
                 onClick={handleSend}
-                style={{ ...styles.syncButton, backgroundColor: "#e67e22" }}>
-                Retry
-              </button>
-              <button
-                onClick={() => setWorkflowState("csv_matched")}
-                style={{ ...styles.syncButton, backgroundColor: "#888" }}>
-                Back to Review
+                disabled={!canSend}
+                style={{
+                  ...styles.syncButton,
+                  backgroundColor: canSend ? "#27ae60" : "#ccc",
+                  cursor: canSend ? "pointer" : "not-allowed"
+                }}>
+                Send {checkedCount} Candidate{checkedCount !== 1 ? "s" : ""}
               </button>
             </>
           )}
-          {jobs.length > 0 && rfIds.length > 0 && (
-            <button
-              onClick={() => setShowJobModal(true)}
-              style={{
-                ...styles.syncButton,
-                backgroundColor: "#0a66c2"
-              }}>
-              Add {rfIds.length} to Job
-            </button>
+
+          {workflowState === "sending" && (
+            <div style={styles.statusCentered}>
+              <div style={styles.spinner} />
+              <p style={styles.statusText}>{sendProgress}</p>
+            </div>
           )}
-          {showJobModal && (
-            <JobModal
-              jobs={jobs}
-              selectedJobId={selectedJobId}
-              onSelect={setSelectedJobId}
-              candidateCount={rfIds.length}
-              onAdd={() => {
-                setShowJobModal(false)
-                handleAddToJob()
-              }}
-              onClose={() => setShowJobModal(false)}
-            />
+
+          {workflowState === "complete" && (
+            <>
+              <p style={{ ...styles.statusText, textAlign: "center" }}>{sendProgress}</p>
+              {candidateResults.length > 0 && (
+                <CandidateResultsList results={candidateResults} />
+              )}
+              {candidateResults.length === 0 && (
+                <>
+                  <button
+                    onClick={handleSend}
+                    style={{ ...styles.syncButton, backgroundColor: "#e67e22" }}>
+                    Retry
+                  </button>
+                  <button
+                    onClick={() => setWorkflowState("csv_matched")}
+                    style={{ ...styles.syncButton, backgroundColor: "#888" }}>
+                    Back to Review
+                  </button>
+                </>
+              )}
+              {jobs.length > 0 && rfIds.length > 0 && (
+                <button
+                  onClick={() => setShowJobModal(true)}
+                  style={{
+                    ...styles.syncButton,
+                    backgroundColor: "#0a66c2"
+                  }}>
+                  Add {rfIds.length} to Job
+                </button>
+              )}
+              {showJobModal && (
+                <JobModal
+                  jobs={jobs}
+                  selectedJobId={selectedJobId}
+                  onSelect={setSelectedJobId}
+                  candidateCount={rfIds.length}
+                  onAdd={() => {
+                    setShowJobModal(false)
+                    handleAddToJob()
+                  }}
+                  onClose={() => setShowJobModal(false)}
+                />
+              )}
+            </>
+          )}
+
+          {workflowState === "adding_to_job" && (
+            <div style={styles.statusCentered}>
+              <div style={styles.spinner} />
+              <p style={styles.statusText}>Adding candidates to job...</p>
+            </div>
+          )}
+
+          {workflowState === "job_added" && (
+            <div style={styles.statusCentered}>
+              <div style={styles.statusIcon}>
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#27ae60" strokeWidth="1.5">
+                  <path d="M22 11.08V12a10 10 0 11-5.93-9.14" strokeLinecap="round" />
+                  <path d="M22 4L12 14.01l-3-3" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+              <p style={styles.statusText}>{jobAddResult}</p>
+              <button
+                onClick={handleReset}
+                style={{
+                  ...styles.syncButton,
+                  backgroundColor: "#0a66c2",
+                  marginTop: "12px"
+                }}>
+                OK
+              </button>
+            </div>
           )}
         </>
       )}
-
-      {workflowState === "adding_to_job" && (
-        <div style={styles.statusCentered}>
-          <div style={styles.spinner} />
-          <p style={styles.statusText}>Adding candidates to job...</p>
-        </div>
-      )}
-
-      {workflowState === "job_added" && (
-        <div style={styles.statusCentered}>
-          <div style={styles.statusIcon}>
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#27ae60" strokeWidth="1.5">
-              <path d="M22 11.08V12a10 10 0 11-5.93-9.14" strokeLinecap="round" />
-              <path d="M22 4L12 14.01l-3-3" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
-          <p style={styles.statusText}>{jobAddResult}</p>
-          <button
-            onClick={handleReset}
-            style={{
-              ...styles.syncButton,
-              backgroundColor: "#0a66c2",
-              marginTop: "12px"
-            }}>
-            OK
-          </button>
-        </div>
-      )}
     </div>
   )
+}
+
+// --- Candidate View ---
+
+function CandidateView({
+  state,
+  onRetry
+}: {
+  state: CandidateState
+  onRetry: () => void
+}) {
+  if (state.phase === "idle" || state.phase === "loading") {
+    return (
+      <div style={styles.statusCentered}>
+        <div style={styles.spinner} />
+        <p style={styles.statusText}>Loading candidate…</p>
+      </div>
+    )
+  }
+
+  if (state.phase === "error") {
+    return (
+      <div style={styles.statusCentered}>
+        <div style={styles.statusIcon}>
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#e74c3c" strokeWidth="1.5">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 8v4M12 16h.01" strokeLinecap="round" />
+          </svg>
+        </div>
+        <p style={styles.statusText}>Failed to load candidate</p>
+        <p style={styles.statusSubtext}>{state.message}</p>
+        <button onClick={onRetry} style={{ ...styles.syncButton, marginTop: "12px" }}>
+          Retry
+        </button>
+      </div>
+    )
+  }
+
+  // phase === "ready" — full UI added in Tasks 12-14.
+  return (
+    <div style={candidateStyles.container}>
+      <p style={candidateStyles.candidateName}>{state.details.fullName}</p>
+    </div>
+  )
+}
+
+const candidateStyles: Record<string, React.CSSProperties> = {
+  container: {
+    width: "100%",
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px"
+  },
+  candidateName: {
+    margin: 0,
+    fontSize: "18px",
+    fontWeight: 600,
+    color: "#222",
+    textAlign: "center"
+  }
 }
 
 // --- Status Display ---
