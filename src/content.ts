@@ -388,6 +388,26 @@ function getSelectedCandidates(): GetSelectedCandidatesResponse {
   return { candidates, count: candidates.length }
 }
 
+// --- Candidate sidepanel: profile URL extraction ---
+
+// The LinkedIn candidate sidepanel hydrates after the URL changes; the profile
+// link element may not be present immediately. Poll briefly for it. No fixed
+// waits on the happy path — returns the moment the element appears.
+async function findCandidateProfileUrl(): Promise<string | null> {
+  const MAX_ATTEMPTS = 20
+  const DELAY_MS = 50
+  for (let i = 0; i < MAX_ATTEMPTS; i++) {
+    const link = document.querySelector(
+      "a[data-test-personal-info-profile-link]"
+    ) as HTMLAnchorElement | null
+    if (link?.href) {
+      return link.href
+    }
+    await new Promise((r) => setTimeout(r, DELAY_MS))
+  }
+  return null
+}
+
 // --- Message listener ---
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -418,6 +438,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const response = getSelectedCandidates()
     sendResponse(response)
     return true
+  }
+
+  if (message.type === "getCandidateProfileUrl") {
+    findCandidateProfileUrl().then((profileUrl) => {
+      sendResponse({ profileUrl })
+    })
+    return true // keep message channel open for async response
   }
 })
 
