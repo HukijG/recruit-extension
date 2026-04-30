@@ -329,6 +329,13 @@ async function addCandidatesToJob(
 
 const sidepanelStyle = document.createElement("style")
 sidepanelStyle.textContent = `
+  html, body {
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+
   @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes wave {
     0%, 60%, 100% { transform: rotate(0deg); }
@@ -415,6 +422,124 @@ sidepanelStyle.textContent = `
     }
     .lr-checkbox-rect { fill-opacity: 0; }
     .lr-checkmark-path { stroke-dashoffset: 0; }
+  }
+
+  /* ----- Candidate-mode action buttons ----- */
+
+  .lr-call-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px 10px;
+    background-color: #1f9d55;
+    color: #ffffff;
+    border: 1px solid #1f9d55;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background-color 120ms ease, border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+    box-shadow: 0 1px 0 rgba(0,0,0,0.04);
+    white-space: nowrap;
+  }
+  .lr-call-btn:hover {
+    background-color: #178044;
+    border-color: #178044;
+    box-shadow: 0 2px 6px rgba(31,157,85,0.32);
+  }
+  .lr-call-btn:active {
+    transform: translateY(1px);
+    box-shadow: 0 1px 0 rgba(0,0,0,0.04);
+  }
+  .lr-call-btn[aria-disabled="true"],
+  .lr-call-btn:disabled {
+    background-color: #eef0f2;
+    color: #98a2ad;
+    border-color: #e3e6ea;
+    cursor: not-allowed;
+    box-shadow: none;
+    pointer-events: none;
+  }
+  .lr-call-btn .lr-call-icon {
+    flex-shrink: 0;
+  }
+
+  .lr-invalid-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 10px;
+    background-color: transparent;
+    color: #d23a2c;
+    border: 1px solid #d23a2c;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 120ms ease, color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+    white-space: nowrap;
+  }
+  .lr-invalid-btn:hover {
+    background-color: #d23a2c;
+    color: #ffffff;
+    box-shadow: 0 2px 6px rgba(210,58,44,0.28);
+  }
+  .lr-invalid-btn:active {
+    transform: translateY(1px);
+    box-shadow: none;
+  }
+  .lr-invalid-btn:disabled {
+    color: #b9bdc4;
+    border-color: #e3e6ea;
+    background-color: #fafbfc;
+    cursor: not-allowed;
+    box-shadow: none;
+  }
+  .lr-invalid-btn:disabled:hover {
+    background-color: #fafbfc;
+    color: #b9bdc4;
+  }
+  .lr-invalid-btn--marked {
+    background-color: #fdecea;
+    color: #b8302a;
+    border-color: #f6c2bd;
+    cursor: default;
+  }
+  .lr-invalid-btn--marked:hover {
+    background-color: #fdecea;
+    color: #b8302a;
+    box-shadow: none;
+  }
+  .lr-invalid-btn--error {
+    background-color: #d23a2c;
+    color: #ffffff;
+  }
+  .lr-invalid-btn--error:hover {
+    background-color: #b8302a;
+    color: #ffffff;
+  }
+
+  /* ----- Cold call row ----- */
+
+  .lr-coldcall-row {
+    transition: border-color 120ms ease, background-color 120ms ease;
+  }
+  .lr-coldcall-row[data-expandable="true"]:hover {
+    border-color: #d6dbe1;
+    background-color: #ffffff;
+  }
+  .lr-coldcall-chevron {
+    transition: transform 160ms ease;
+    transform-origin: 50% 50%;
+  }
+  .lr-coldcall-chevron[data-open="true"] {
+    transform: rotate(90deg);
   }
 `
 if (!document.querySelector("[data-lr-sync-styles]")) {
@@ -1280,40 +1405,108 @@ function CandidateView({
   // phase === "ready"
   return (
     <div style={candidateStyles.container}>
-      <p style={candidateStyles.candidateName}>{state.details.fullName}</p>
-      <div style={candidateStyles.phoneAndInvalidRow}>
-        <CandidatePhoneRow phoneNumber={state.details.phoneNumber} />
-        <NumberInvalidButton
-          rfId={state.details.rfId}
-          phoneNumber={state.details.phoneNumber}
-          state={state.markInvalid}
-          onArm={onArmMarkInvalid}
-          onUndo={onUndoMarkInvalid}
-          onRetry={onRetryMarkInvalid}
-        />
-      </div>
+      <header style={candidateStyles.identityCard}>
+        <h2 style={candidateStyles.candidateName}>{state.details.fullName}</h2>
+        <PhoneNumberLabel phoneNumber={state.details.phoneNumber} />
+        <div style={candidateStyles.actionRow}>
+          <CallButton phoneNumber={state.details.phoneNumber} />
+          <NumberInvalidButton
+            rfId={state.details.rfId}
+            phoneNumber={state.details.phoneNumber}
+            state={state.markInvalid}
+            onArm={onArmMarkInvalid}
+            onUndo={onUndoMarkInvalid}
+            onRetry={onRetryMarkInvalid}
+          />
+        </div>
+      </header>
       <CandidateJobBox job={state.details.job} />
       <CandidateColdCallList activities={state.details.activities} />
     </div>
   )
 }
 
-function CandidatePhoneRow({ phoneNumber }: { phoneNumber: string | null }) {
+function PhoneNumberLabel({ phoneNumber }: { phoneNumber: string | null }) {
+  if (!phoneNumber) {
+    return <p style={candidateStyles.phoneNumberMissing}>No phone on file</p>
+  }
+  return (
+    <p style={candidateStyles.phoneNumber}>{formatPhoneDisplay(phoneNumber)}</p>
+  )
+}
+
+function CallIcon() {
+  return (
+    <svg
+      className="lr-call-icon"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true">
+      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+    </svg>
+  )
+}
+
+function CallButton({ phoneNumber }: { phoneNumber: string | null }) {
   if (!phoneNumber) {
     return (
-      <div style={candidateStyles.phoneRow}>
-        <span style={candidateStyles.phoneDisabled}>📞 No phone on file</span>
-      </div>
+      <button type="button" disabled className="lr-call-btn" aria-label="Call (no phone on file)">
+        <CallIcon />
+        Call
+      </button>
     )
   }
   const dialUrl = `dialpad://${phoneNumber}?launchMinimode=1`
+  const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault()
+    launchProtocol(dialUrl)
+  }
   return (
-    <div style={candidateStyles.phoneRow}>
-      <a href={dialUrl} style={candidateStyles.phoneLink}>
-        📞 {phoneNumber}
-      </a>
-    </div>
+    <a
+      href={dialUrl}
+      className="lr-call-btn"
+      onClick={handleClick}
+      aria-label={`Call ${phoneNumber}`}>
+      <CallIcon />
+      Call
+    </a>
   )
+}
+
+// Top-level navigation to a custom-scheme URL (dialpad://, tel://, etc.) is
+// silently dropped inside a Chrome sidepanel — and a hidden iframe inherits
+// the same restriction, so the OS handler never sees the URL and the desktop
+// app doesn't get a chance to prompt for permission. Routing the URL through
+// a transient background tab gives Chrome's full tab navigator a shot at it,
+// which surfaces the standard "Open Dialpad?" prompt the first time and
+// launches the app on subsequent clicks once the user picks "Always allow".
+// We close the (now-blank) tab a beat later so the only artefact the user
+// sees is a momentary flash in the tab bar.
+function launchProtocol(url: string) {
+  if (typeof chrome !== "undefined" && chrome.tabs?.create) {
+    chrome.tabs.create({ url, active: false }).then(
+      (tab) => {
+        if (tab?.id != null) {
+          const tabId = tab.id
+          window.setTimeout(() => {
+            chrome.tabs.remove(tabId).catch(() => {})
+          }, 1500)
+        }
+      },
+      (err) => {
+        console.warn("[CallButton] chrome.tabs.create failed:", err)
+        window.open(url, "_blank")
+      }
+    )
+    return
+  }
+  window.open(url, "_blank")
 }
 
 function CandidateJobBox({ job }: { job: CandidateJob | null }) {
@@ -1324,11 +1517,15 @@ function CandidateJobBox({ job }: { job: CandidateJob | null }) {
       </div>
     )
   }
+  const stageStyle = stageChipStyle(job.stage)
   return (
     <div style={candidateStyles.jobBox}>
       <p style={candidateStyles.jobTitle}>{job.title}</p>
-      <p style={candidateStyles.jobCompany}>{job.company}</p>
-      <span style={candidateStyles.jobStageChip}>{job.stage}</span>
+      {job.company && <p style={candidateStyles.jobCompany}>{job.company}</p>}
+      <span style={{ ...candidateStyles.jobStageChip, ...stageStyle }}>
+        <span style={{ ...candidateStyles.jobStageDot, backgroundColor: stageStyle.color }} />
+        {job.stage}
+      </span>
     </div>
   )
 }
@@ -1366,30 +1563,65 @@ function CandidateColdCallList({ activities }: { activities: CandidateActivity[]
       <p style={candidateStyles.coldCallHeading}>Cold calls ({coldCalls.length})</p>
       {coldCalls.map((c, i) => {
         const date = formatActivityDate(c.createdAt)
-        const isConnected = c.outcome === "connected"
+        const outcome = formatOutcome(c.outcome)
         const hasNotes = c.description.trim().length > 0
-        const canExpand = isConnected || hasNotes
+        const canExpand = hasNotes
         const isExpanded = expanded.has(c.id)
         return (
-          <div key={c.id} style={candidateStyles.coldCallRow}>
+          <div
+            key={c.id}
+            className="lr-coldcall-row"
+            data-expandable={canExpand}
+            style={candidateStyles.coldCallRow}>
             <div
               style={{
                 ...candidateStyles.coldCallHeader,
                 cursor: canExpand ? "pointer" : "default"
               }}
-              onClick={canExpand ? () => toggle(c.id) : undefined}>
-              <span style={candidateStyles.coldCallChevron}>
-                {canExpand ? (isExpanded ? "▾" : "▸") : "·"}
+              onClick={canExpand ? () => toggle(c.id) : undefined}
+              role={canExpand ? "button" : undefined}
+              aria-expanded={canExpand ? isExpanded : undefined}>
+              <span style={candidateStyles.coldCallIconColumn} aria-hidden="true">
+                {canExpand && (
+                  <svg
+                    className="lr-coldcall-chevron"
+                    data-open={isExpanded}
+                    width="9"
+                    height="9"
+                    viewBox="0 0 9 9"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round">
+                    <polyline points="2.5 1.5 6 4.5 2.5 7.5" />
+                  </svg>
+                )}
               </span>
-              <span style={candidateStyles.coldCallLabel}>
-                Cold call {i + 1} — {date}
-              </span>
-              {isConnected && <span style={candidateStyles.coldCallConnected}>✓</span>}
+              <span style={candidateStyles.coldCallLabel}>Cold call {i + 1}</span>
+              <span style={candidateStyles.coldCallDate}>{date}</span>
             </div>
+            {outcome && (
+              <div style={candidateStyles.coldCallOutcomeRow}>
+                <span style={candidateStyles.coldCallIconColumn} aria-hidden="true">
+                  <span
+                    style={{
+                      ...candidateStyles.coldCallOutcomeDot,
+                      backgroundColor: outcomeDotColor(outcome.tone)
+                    }}
+                  />
+                </span>
+                <span
+                  style={{
+                    ...candidateStyles.coldCallOutcomeText,
+                    color: outcomeTextColor(outcome.tone)
+                  }}>
+                  {outcome.label}
+                </span>
+              </div>
+            )}
             {canExpand && isExpanded && (
-              <p style={candidateStyles.coldCallDescription}>
-                {hasNotes ? c.description : "(connected)"}
-              </p>
+              <p style={candidateStyles.coldCallDescription}>{c.description}</p>
             )}
           </div>
         )
@@ -1406,6 +1638,68 @@ function formatActivityDate(iso: string): string {
     month: "short",
     day: "numeric"
   })
+}
+
+function formatPhoneDisplay(raw: string): string {
+  const digits = raw.replace(/\D/g, "")
+  if (digits.length === 11 && digits.startsWith("1")) {
+    return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`
+  }
+  if (digits.length === 10) {
+    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`
+  }
+  return raw
+}
+
+type OutcomeTone = "positive" | "neutral" | "negative"
+
+function formatOutcome(
+  outcome: string | null
+): { label: string; tone: OutcomeTone } | null {
+  if (!outcome) return null
+  const code = outcome.toLowerCase().trim()
+  const map: Record<string, { label: string; tone: OutcomeTone }> = {
+    connected: { label: "Connected", tone: "positive" },
+    interested: { label: "Interested", tone: "positive" },
+    voicemail: { label: "Voicemail", tone: "neutral" },
+    no_answer: { label: "No answer", tone: "neutral" },
+    callback: { label: "Callback requested", tone: "neutral" },
+    busy: { label: "Busy", tone: "neutral" },
+    not_interested: { label: "Not interested", tone: "negative" },
+    declined: { label: "Declined", tone: "negative" },
+    wrong_number: { label: "Wrong number", tone: "negative" }
+  }
+  if (map[code]) return map[code]
+  const label = outcome
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+  return { label, tone: "neutral" }
+}
+
+function outcomeDotColor(tone: OutcomeTone): string {
+  if (tone === "positive") return "#1f9d55"
+  if (tone === "negative") return "#d23a2c"
+  return "#9aa0a6"
+}
+
+function outcomeTextColor(tone: OutcomeTone): string {
+  if (tone === "positive") return "#157040"
+  if (tone === "negative") return "#a82a20"
+  return "#3c4043"
+}
+
+function stageChipStyle(stage: string): { color: string; backgroundColor: string; borderColor: string } {
+  const s = stage.toLowerCase()
+  if (/replied|interested|connect|engaged/.test(s)) {
+    return { color: "#157040", backgroundColor: "#e6f4ec", borderColor: "#cfe7d8" }
+  }
+  if (/declin|not interest|reject|archiv/.test(s)) {
+    return { color: "#a82a20", backgroundColor: "#fdecea", borderColor: "#f6c2bd" }
+  }
+  if (/contact|reach|sent|outreach/.test(s)) {
+    return { color: "#0a66c2", backgroundColor: "#e6efff", borderColor: "#c9dcff" }
+  }
+  return { color: "#3c4043", backgroundColor: "#eef0f2", borderColor: "#dfe2e6" }
 }
 
 const UNDO_DELAY_MS = 5000
@@ -1433,24 +1727,26 @@ function NumberInvalidButton({
 
   if (state.status === "error") {
     return (
-      <button onClick={onRetry} style={candidateStyles.invalidButtonError}>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="lr-invalid-btn lr-invalid-btn--error">
         Retry mark invalid
       </button>
     )
   }
 
+  const className = isMarked
+    ? "lr-invalid-btn lr-invalid-btn--marked"
+    : "lr-invalid-btn"
+
   return (
     <button
+      type="button"
       onClick={onArm}
       disabled={isDisabled || isMarked}
-      style={
-        isMarked
-          ? candidateStyles.invalidButtonMarked
-          : isDisabled
-            ? candidateStyles.invalidButtonDisabled
-            : candidateStyles.invalidButton
-      }>
-      {isMarked ? "Marked invalid ✓" : "Number Invalid"}
+      className={className}>
+      {isMarked ? "Marked invalid" : "Number Invalid"}
     </button>
   )
 }
@@ -1487,178 +1783,179 @@ const candidateStyles: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     gap: "12px"
   },
+  identityCard: {
+    width: "100%",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: "8px",
+    padding: "14px 12px 12px",
+    backgroundColor: "#ffffff",
+    border: "1px solid #e3e6ea",
+    borderRadius: "12px",
+    boxShadow: "0 1px 2px rgba(15,23,42,0.04)"
+  },
   candidateName: {
     margin: 0,
-    fontSize: "18px",
-    fontWeight: 600,
-    color: "#222",
-    textAlign: "center"
+    fontSize: "20px",
+    lineHeight: 1.2,
+    fontWeight: 700,
+    color: "#15171a",
+    textAlign: "center",
+    letterSpacing: "-0.01em"
   },
-  phoneRow: {
+  phoneNumber: {
+    margin: 0,
+    fontSize: "13px",
+    color: "#3c4043",
+    textAlign: "center",
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "0.01em"
+  },
+  phoneNumberMissing: {
+    margin: 0,
+    fontSize: "13px",
+    color: "#80868b",
+    textAlign: "center",
+    fontStyle: "italic"
+  },
+  actionRow: {
     display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: "12px"
-  },
-  phoneLink: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "6px",
-    padding: "8px 16px",
-    backgroundColor: "#0a66c2",
-    color: "#fff",
-    borderRadius: "20px",
-    fontSize: "14px",
-    fontWeight: 500,
-    textDecoration: "none"
-  },
-  phoneDisabled: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "6px",
-    padding: "8px 16px",
-    backgroundColor: "#f0f0f0",
-    color: "#999",
-    borderRadius: "20px",
-    fontSize: "14px",
-    fontWeight: 500
+    flexDirection: "row",
+    alignItems: "stretch",
+    gap: "8px",
+    marginTop: "4px"
   },
   jobBox: {
     width: "100%",
     padding: "12px 14px",
-    backgroundColor: "#f8f9fa",
-    borderRadius: "8px",
-    border: "1px solid #e8e8e8",
+    backgroundColor: "#ffffff",
+    borderRadius: "12px",
+    border: "1px solid #e3e6ea",
     display: "flex",
     flexDirection: "column",
-    gap: "4px"
+    gap: "6px",
+    boxShadow: "0 1px 2px rgba(15,23,42,0.04)"
   },
   jobTitle: {
     margin: 0,
-    fontSize: "14px",
+    fontSize: "15px",
     fontWeight: 600,
-    color: "#222"
+    color: "#15171a",
+    lineHeight: 1.3
   },
   jobCompany: {
     margin: 0,
     fontSize: "13px",
-    color: "#555"
+    color: "#3c4043"
   },
   jobStageChip: {
     alignSelf: "flex-start",
-    fontSize: "11px",
-    padding: "2px 8px",
-    borderRadius: "10px",
-    backgroundColor: "#e8f0fe",
-    color: "#0a66c2",
-    fontWeight: 500,
-    marginTop: "4px"
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "6px",
+    fontSize: "12px",
+    padding: "4px 10px",
+    borderRadius: "999px",
+    fontWeight: 600,
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "transparent",
+    marginTop: "2px"
+  },
+  jobStageDot: {
+    width: "6px",
+    height: "6px",
+    borderRadius: "50%"
   },
   jobPlaceholder: {
     margin: 0,
     fontSize: "13px",
-    color: "#888",
+    color: "#80868b",
     fontStyle: "italic"
   },
   coldCallSection: {
     width: "100%",
     display: "flex",
     flexDirection: "column",
-    gap: "4px"
+    gap: "8px"
   },
   coldCallHeading: {
-    margin: "0 0 4px 0",
-    fontSize: "12px",
-    fontWeight: 600,
-    color: "#555",
+    margin: "0 0 2px 0",
+    fontSize: "13px",
+    fontWeight: 700,
+    color: "#15171a",
     textTransform: "uppercase",
-    letterSpacing: "0.5px"
+    letterSpacing: "0.6px"
   },
   coldCallEmpty: {
     margin: 0,
-    fontSize: "12px",
-    color: "#888",
+    fontSize: "13px",
+    color: "#80868b",
     fontStyle: "italic"
   },
   coldCallRow: {
-    padding: "6px 8px",
-    backgroundColor: "#fafafa",
-    borderRadius: "6px",
-    border: "1px solid #eee"
+    padding: "10px 12px",
+    backgroundColor: "#ffffff",
+    borderRadius: "10px",
+    border: "1px solid #e3e6ea",
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px"
   },
   coldCallHeader: {
     display: "flex",
     alignItems: "center",
     gap: "8px",
-    fontSize: "13px",
-    color: "#333"
+    fontSize: "15px",
+    color: "#15171a",
+    fontWeight: 600,
+    lineHeight: 1.3
   },
-  coldCallChevron: {
-    fontSize: "11px",
-    color: "#888",
+  coldCallIconColumn: {
     width: "12px",
-    textAlign: "center"
+    flexShrink: 0,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: "#5f6368"
   },
   coldCallLabel: {
-    flex: 1
+    flex: 1,
+    minWidth: 0
   },
-  coldCallConnected: {
-    color: "#27ae60",
+  coldCallDate: {
+    fontSize: "13px",
+    color: "#5f6368",
+    fontWeight: 500,
+    fontVariantNumeric: "tabular-nums",
+    flexShrink: 0
+  },
+  coldCallOutcomeRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    lineHeight: 1.3
+  },
+  coldCallOutcomeDot: {
+    width: "7px",
+    height: "7px",
+    borderRadius: "50%",
+    display: "block"
+  },
+  coldCallOutcomeText: {
+    fontSize: "13px",
     fontWeight: 600
   },
   coldCallDescription: {
-    margin: "6px 0 0 20px",
-    fontSize: "12px",
-    color: "#555",
-    fontStyle: "italic",
-    lineHeight: "1.4"
-  },
-  phoneAndInvalidRow: {
-    width: "100%",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: "8px"
-  },
-  invalidButton: {
-    padding: "6px 14px",
-    fontSize: "12px",
-    fontWeight: 500,
-    color: "#e74c3c",
-    backgroundColor: "#fff",
-    border: "1px solid #e74c3c",
-    borderRadius: "16px",
-    cursor: "pointer"
-  },
-  invalidButtonMarked: {
-    padding: "6px 14px",
-    fontSize: "12px",
-    fontWeight: 500,
-    color: "#888",
-    backgroundColor: "#f5f5f5",
-    border: "1px solid #ddd",
-    borderRadius: "16px",
-    cursor: "default"
-  },
-  invalidButtonDisabled: {
-    padding: "6px 14px",
-    fontSize: "12px",
-    fontWeight: 500,
-    color: "#bbb",
-    backgroundColor: "#fafafa",
-    border: "1px solid #eee",
-    borderRadius: "16px",
-    cursor: "not-allowed"
-  },
-  invalidButtonError: {
-    padding: "6px 14px",
-    fontSize: "12px",
-    fontWeight: 500,
-    color: "#fff",
-    backgroundColor: "#e74c3c",
-    border: "none",
-    borderRadius: "16px",
-    cursor: "pointer"
+    margin: 0,
+    paddingTop: "6px",
+    borderTop: "1px solid #eef0f2",
+    fontSize: "13px",
+    color: "#3c4043",
+    lineHeight: 1.5,
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word"
   },
   toast: {
     position: "fixed",
