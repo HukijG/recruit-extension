@@ -334,27 +334,34 @@ if (!document.querySelector("[data-lr-sync-styles]")) {
   document.head.appendChild(spinnerStyle)
 }
 
-// --- Consultant Name Header ---
+// --- Inline editable consultant name (used inside the landing greeting) ---
 
-function ConsultantNameHeader() {
-  const [name, setName] = useStorage<string>(
-    { key: "consultantFirstName", instance: localStore },
-    ""
-  )
+function EditableName({
+  name,
+  onChange
+}: {
+  name: string
+  onChange: (next: string) => void
+}) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState("")
+  const [hover, setHover] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const startEdit = () => {
-    setDraft(name ?? "")
+    setDraft(name)
     setEditing(true)
     setTimeout(() => inputRef.current?.focus(), 0)
   }
 
   const confirmEdit = () => {
     const trimmed = draft.trim()
-    if (!trimmed) return // reject empty submission, stay in edit mode
-    setName(trimmed)
+    if (!trimmed) {
+      // empty submission reverts to the prior name without changes
+      setEditing(false)
+      return
+    }
+    onChange(trimmed)
     setEditing(false)
   }
 
@@ -365,103 +372,96 @@ function ConsultantNameHeader() {
 
   if (editing) {
     return (
-      <div style={consultantStyles.headerRow}>
-        <input
-          ref={inputRef}
-          type="text"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") confirmEdit()
-            else if (e.key === "Escape") cancelEdit()
-          }}
-          onBlur={cancelEdit}
-          placeholder="First name"
-          style={consultantStyles.headerInput}
-        />
-        <button
-          onMouseDown={(e) => {
-            e.preventDefault()
-            confirmEdit()
-          }}
-          style={consultantStyles.headerConfirm}>
-          Confirm
-        </button>
-      </div>
+      <input
+        ref={inputRef}
+        type="text"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") confirmEdit()
+          else if (e.key === "Escape") cancelEdit()
+        }}
+        onBlur={confirmEdit}
+        style={styles.greetingNameInput}
+      />
     )
   }
 
-  const hasName = !!(name && name.trim())
   return (
-    <div style={consultantStyles.headerRow}>
-      <button
-        onClick={startEdit}
-        style={hasName ? consultantStyles.headerSet : consultantStyles.headerUnset}
-        title="Click to edit your name">
-        <span>{hasName ? name : "Add your name"}</span>
-        <span style={consultantStyles.headerEditIcon}>✎</span>
-      </button>
-    </div>
+    <span
+      onClick={startEdit}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        ...styles.greetingNameDisplay,
+        borderBottomColor: hover ? "#0a66c2" : "transparent"
+      }}
+      title="Click to edit your name">
+      {name}
+      <span
+        style={{
+          ...styles.greetingNamePencil,
+          opacity: hover ? 0.7 : 0
+        }}>
+        ✎
+      </span>
+    </span>
   )
 }
 
-const consultantStyles: Record<string, React.CSSProperties> = {
-  headerRow: {
-    width: "100%",
-    display: "flex",
-    justifyContent: "flex-start",
-    alignItems: "center",
-    gap: "6px",
-    marginBottom: "-12px"
-  },
-  headerSet: {
-    background: "#fff",
-    border: "1px solid #e0e0e0",
-    borderRadius: "12px",
-    padding: "4px 10px",
-    fontSize: "11px",
-    fontWeight: 500,
-    color: "#444",
-    cursor: "pointer",
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "6px"
-  },
-  headerUnset: {
-    background: "#fafafa",
-    border: "1px dashed #ccc",
-    borderRadius: "12px",
-    padding: "4px 10px",
-    fontSize: "11px",
-    fontStyle: "italic",
-    color: "#999",
-    cursor: "pointer",
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "6px"
-  },
-  headerEditIcon: {
-    fontSize: "10px",
-    opacity: 0.6
-  },
-  headerInput: {
-    padding: "4px 8px",
-    fontSize: "12px",
-    border: "1px solid #0a66c2",
-    borderRadius: "12px",
-    outline: "none",
-    width: "120px"
-  },
-  headerConfirm: {
-    padding: "4px 10px",
-    fontSize: "11px",
-    fontWeight: 500,
-    color: "#fff",
-    background: "#0a66c2",
-    border: "none",
-    borderRadius: "12px",
-    cursor: "pointer"
+// --- First-time setup greeting (when consultant name is unset) ---
+
+function NameSetupGreeting({
+  onSetName
+}: {
+  onSetName: (name: string) => void
+}) {
+  const [draft, setDraft] = useState("")
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  const canSubmit = draft.trim().length > 0
+  const submit = () => {
+    if (!canSubmit) return
+    onSetName(draft.trim())
   }
+
+  return (
+    <div style={styles.greetingHero}>
+      <p style={styles.greetingEmoji}>👋</p>
+      <h1 style={styles.greetingTitle}>Welcome!</h1>
+      <p style={styles.greetingBody}>
+        Set your first name so synced candidates are attributed to you in
+        Recruiterflow.
+      </p>
+      <div style={styles.nameSetupRow}>
+        <input
+          ref={inputRef}
+          type="text"
+          placeholder="First name"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && canSubmit) submit()
+          }}
+          style={styles.nameSetupInput}
+        />
+        <button
+          onClick={submit}
+          disabled={!canSubmit}
+          style={{
+            ...styles.nameSetupButton,
+            opacity: canSubmit ? 1 : 0.5,
+            cursor: canSubmit ? "pointer" : "not-allowed"
+          }}>
+          Set
+        </button>
+      </div>
+    </div>
+  )
 }
 
 // --- Main Component ---
@@ -957,8 +957,6 @@ function SidePanel() {
 
   return (
     <div style={styles.container}>
-      <ConsultantNameHeader />
-
       {mode === "candidate" && (
         <>
           <CandidateView
@@ -1602,17 +1600,27 @@ function StatusDisplay({
   loadStatus: string
   count: number
 }) {
+  const [name, setName] = useStorage<string>(
+    { key: "consultantFirstName", instance: localStore },
+    ""
+  )
+  const trimmedName = (name ?? "").trim()
+
   if (state === "not_on_pipeline") {
+    if (!trimmedName) {
+      return <NameSetupGreeting onSetName={setName} />
+    }
     return (
-      <div style={styles.statusCentered}>
-        <div style={styles.statusIcon}>
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#999" strokeWidth="1.5">
-            <path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            <path d="M9 10h.01M15 10h.01M9.5 15.5a3.5 3.5 0 005 0" strokeLinecap="round" />
-          </svg>
-        </div>
-        <p style={styles.statusText}>Navigate to a LinkedIn Recruiter pipeline page</p>
-        <p style={styles.statusSubtext}>The extension will activate when it detects a pipeline view</p>
+      <div style={styles.greetingHero}>
+        <h1 style={styles.greetingTitle}>
+          Hi, <EditableName name={trimmedName} onChange={setName} />!
+        </h1>
+        <p style={styles.greetingBody}>
+          Navigate to a LinkedIn Recruiter pipeline page to get started.
+        </p>
+        <p style={styles.greetingSubtle}>
+          The extension will activate when it detects a pipeline view.
+        </p>
       </div>
     )
   }
@@ -2301,6 +2309,102 @@ const styles: Record<string, React.CSSProperties> = {
     gap: "20px",
     minHeight: "100vh",
     boxSizing: "border-box"
+  },
+  greetingHero: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    textAlign: "center",
+    gap: "10px",
+    marginTop: "44px",
+    padding: "0 8px",
+    width: "100%"
+  },
+  greetingEmoji: {
+    fontSize: "32px",
+    margin: 0,
+    lineHeight: 1
+  },
+  greetingTitle: {
+    fontSize: "24px",
+    fontWeight: 600,
+    color: "#0d0d0d",
+    margin: "0 0 6px 0",
+    lineHeight: 1.3,
+    letterSpacing: "-0.01em"
+  },
+  greetingBody: {
+    fontSize: "13px",
+    color: "#444",
+    lineHeight: 1.5,
+    margin: 0,
+    maxWidth: "280px"
+  },
+  greetingSubtle: {
+    fontSize: "12px",
+    color: "#888",
+    lineHeight: 1.5,
+    margin: 0,
+    maxWidth: "260px"
+  },
+  greetingNameDisplay: {
+    display: "inline-flex",
+    alignItems: "baseline",
+    cursor: "pointer",
+    color: "#0d0d0d",
+    fontWeight: 700,
+    borderBottom: "1px dashed transparent",
+    transition: "border-bottom-color 0.15s",
+    paddingBottom: "1px"
+  },
+  greetingNamePencil: {
+    fontSize: "13px",
+    marginLeft: "4px",
+    transition: "opacity 0.15s",
+    color: "#0a66c2",
+    fontWeight: 400
+  },
+  greetingNameInput: {
+    fontSize: "24px",
+    fontWeight: 700,
+    color: "#0d0d0d",
+    border: "none",
+    borderBottom: "2px solid #0a66c2",
+    background: "transparent",
+    outline: "none",
+    width: "120px",
+    padding: 0,
+    margin: 0,
+    fontFamily: "inherit",
+    textAlign: "center",
+    letterSpacing: "-0.01em"
+  },
+  nameSetupRow: {
+    display: "flex",
+    gap: "8px",
+    marginTop: "12px",
+    width: "100%",
+    maxWidth: "280px"
+  },
+  nameSetupInput: {
+    flex: 1,
+    padding: "10px 14px",
+    fontSize: "14px",
+    border: "1px solid #ddd",
+    borderRadius: "20px",
+    outline: "none",
+    textAlign: "center",
+    fontFamily: "inherit",
+    boxSizing: "border-box"
+  },
+  nameSetupButton: {
+    padding: "10px 20px",
+    backgroundColor: "#0a66c2",
+    color: "#fff",
+    border: "none",
+    borderRadius: "20px",
+    fontSize: "14px",
+    fontWeight: 600
   },
   statusCentered: {
     display: "flex",
