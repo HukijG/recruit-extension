@@ -325,18 +325,50 @@ async function addCandidatesToJob(
   }
 }
 
-// --- Inject spinner animation ---
+// --- Inject keyframe animations ---
 
-const spinnerStyle = document.createElement("style")
-spinnerStyle.textContent = `@keyframes spin { to { transform: rotate(360deg); } }`
+const sidepanelStyle = document.createElement("style")
+sidepanelStyle.textContent = `
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes wave {
+    0%, 60%, 100% { transform: rotate(0deg); }
+    10%, 30% { transform: rotate(14deg); }
+    20% { transform: rotate(-8deg); }
+    40% { transform: rotate(14deg); }
+    50% { transform: rotate(-4deg); }
+  }
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+`
 if (!document.querySelector("[data-lr-sync-styles]")) {
-  spinnerStyle.setAttribute("data-lr-sync-styles", "")
-  document.head.appendChild(spinnerStyle)
+  sidepanelStyle.setAttribute("data-lr-sync-styles", "")
+  document.head.appendChild(sidepanelStyle)
 }
 
-// --- Inline editable consultant name (used inside the landing greeting) ---
+// --- Pencil glyph used by the editable name heading ---
 
-function EditableName({
+function PencilIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+    </svg>
+  )
+}
+
+// --- Greeting heading with inline editable name ---
+
+function EditableNameHeading({
   name,
   onChange
 }: {
@@ -346,6 +378,8 @@ function EditableName({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState("")
   const [hover, setHover] = useState(false)
+  const [nameHover, setNameHover] = useState(false)
+  const [inputFocus, setInputFocus] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const startEdit = () => {
@@ -357,7 +391,7 @@ function EditableName({
   const confirmEdit = () => {
     const trimmed = draft.trim()
     if (!trimmed) {
-      // empty submission reverts to the prior name without changes
+      // empty submission reverts to the prior name with no change
       setEditing(false)
       return
     }
@@ -372,40 +406,69 @@ function EditableName({
 
   if (editing) {
     return (
-      <input
-        ref={inputRef}
-        type="text"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") confirmEdit()
-          else if (e.key === "Escape") cancelEdit()
-        }}
-        onBlur={confirmEdit}
-        style={styles.greetingNameInput}
-      />
+      <h1 style={styles.greetingTitle}>
+        <span>Hi, </span>
+        <input
+          ref={inputRef}
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") confirmEdit()
+            else if (e.key === "Escape") cancelEdit()
+          }}
+          onFocus={() => setInputFocus(true)}
+          onBlur={() => {
+            setInputFocus(false)
+            confirmEdit()
+          }}
+          style={{
+            ...styles.greetingNameInput,
+            borderBottomColor: inputFocus ? "#0a66c2" : "#9bb6dc"
+          }}
+        />
+        <span>!</span>
+      </h1>
     )
   }
 
   return (
-    <span
-      onClick={startEdit}
+    <h1
+      style={styles.greetingTitle}
       onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        ...styles.greetingNameDisplay,
-        borderBottomColor: hover ? "#0a66c2" : "transparent"
-      }}
-      title="Click to edit your name">
-      {name}
+      onMouseLeave={() => setHover(false)}>
+      <span>Hi, </span>
       <span
+        onClick={startEdit}
+        onMouseEnter={() => setNameHover(true)}
+        onMouseLeave={() => setNameHover(false)}
         style={{
-          ...styles.greetingNamePencil,
-          opacity: hover ? 0.7 : 0
-        }}>
-        ✎
+          ...styles.greetingName,
+          backgroundColor: nameHover ? "#d3e3f7" : "#e8f0fe"
+        }}
+        title="Click to edit your name">
+        {name}
       </span>
-    </span>
+      <span>!</span>
+      <span
+        role="button"
+        aria-label="Edit name"
+        tabIndex={0}
+        onClick={startEdit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault()
+            startEdit()
+          }
+        }}
+        style={{
+          ...styles.greetingEditIcon,
+          opacity: hover ? 1 : 0,
+          transform: hover ? "translateY(0)" : "translateY(-2px)"
+        }}>
+        <PencilIcon />
+      </span>
+    </h1>
   )
 }
 
@@ -417,6 +480,8 @@ function NameSetupGreeting({
   onSetName: (name: string) => void
 }) {
   const [draft, setDraft] = useState("")
+  const [inputFocus, setInputFocus] = useState(false)
+  const [buttonHover, setButtonHover] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -431,11 +496,15 @@ function NameSetupGreeting({
 
   return (
     <div style={styles.greetingHero}>
-      <p style={styles.greetingEmoji}>👋</p>
-      <h1 style={styles.greetingTitle}>Welcome!</h1>
+      <span style={{ ...styles.wave, ...styles.waveLarge }} aria-hidden="true">
+        👋
+      </span>
+      <h1 style={styles.welcomeTitle}>
+        Welcome <span style={styles.welcomeAccent}>aboard</span>
+      </h1>
       <p style={styles.greetingBody}>
-        Set your first name so synced candidates are attributed to you in
-        Recruiterflow.
+        Tell us your first name so the candidates you sync get attributed to{" "}
+        <em style={styles.greetingEmphasis}>you</em> in Recruiterflow.
       </p>
       <div style={styles.nameSetupRow}>
         <input
@@ -447,19 +516,35 @@ function NameSetupGreeting({
           onKeyDown={(e) => {
             if (e.key === "Enter" && canSubmit) submit()
           }}
-          style={styles.nameSetupInput}
+          onFocus={() => setInputFocus(true)}
+          onBlur={() => setInputFocus(false)}
+          style={{
+            ...styles.nameSetupInput,
+            borderColor: inputFocus ? "#0a66c2" : "#d8dee5",
+            boxShadow: inputFocus ? "0 0 0 3px rgba(10, 102, 194, 0.15)" : "none"
+          }}
         />
         <button
           onClick={submit}
           disabled={!canSubmit}
+          onMouseEnter={() => setButtonHover(true)}
+          onMouseLeave={() => setButtonHover(false)}
           style={{
             ...styles.nameSetupButton,
             opacity: canSubmit ? 1 : 0.5,
-            cursor: canSubmit ? "pointer" : "not-allowed"
+            cursor: canSubmit ? "pointer" : "not-allowed",
+            backgroundColor:
+              canSubmit && buttonHover ? "#084e9c" : "#0a66c2",
+            transform: canSubmit && buttonHover ? "translateY(-1px)" : "none",
+            boxShadow:
+              canSubmit && buttonHover
+                ? "0 4px 10px rgba(10, 102, 194, 0.25)"
+                : "0 1px 3px rgba(10, 102, 194, 0.18)"
           }}>
           Set
         </button>
       </div>
+      <p style={styles.greetingHint}>You can change this anytime.</p>
     </div>
   )
 }
@@ -1612,14 +1697,14 @@ function StatusDisplay({
     }
     return (
       <div style={styles.greetingHero}>
-        <h1 style={styles.greetingTitle}>
-          Hi, <EditableName name={trimmedName} onChange={setName} />!
-        </h1>
+        <span style={styles.wave} aria-hidden="true">👋</span>
+        <EditableNameHeading name={trimmedName} onChange={setName} />
         <p style={styles.greetingBody}>
-          Navigate to a LinkedIn Recruiter pipeline page to get started.
+          Pop open a LinkedIn Recruiter pipeline and the extension will spring
+          to life.
         </p>
         <p style={styles.greetingSubtle}>
-          The extension will activate when it detects a pipeline view.
+          It activates the moment it detects a pipeline view.
         </p>
       </div>
     )
@@ -2316,95 +2401,148 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     textAlign: "center",
     gap: "10px",
-    marginTop: "44px",
-    padding: "0 8px",
-    width: "100%"
+    marginTop: "32px",
+    padding: "0 12px",
+    width: "100%",
+    animation: "fade-up 0.35s ease-out"
   },
-  greetingEmoji: {
-    fontSize: "32px",
-    margin: 0,
-    lineHeight: 1
+  wave: {
+    fontSize: "40px",
+    display: "inline-block",
+    transformOrigin: "70% 70%",
+    animation: "wave 2.6s ease-in-out infinite",
+    marginBottom: "4px"
+  },
+  waveLarge: {
+    fontSize: "56px"
   },
   greetingTitle: {
-    fontSize: "24px",
+    fontSize: "26px",
     fontWeight: 600,
     color: "#0d0d0d",
-    margin: "0 0 6px 0",
-    lineHeight: 1.3,
-    letterSpacing: "-0.01em"
+    margin: "2px 0",
+    lineHeight: 1.25,
+    letterSpacing: "-0.02em",
+    fontFamily:
+      'ui-rounded, "SF Pro Rounded", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif',
+    display: "inline-flex",
+    alignItems: "center",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: "0px"
+  },
+  welcomeTitle: {
+    fontSize: "30px",
+    fontWeight: 700,
+    color: "#0d0d0d",
+    margin: "4px 0 6px 0",
+    lineHeight: 1.2,
+    letterSpacing: "-0.025em",
+    fontFamily:
+      'ui-rounded, "SF Pro Rounded", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif'
+  },
+  welcomeAccent: {
+    background: "linear-gradient(135deg, #0a66c2 0%, #2d8eff 100%)",
+    WebkitBackgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+    backgroundClip: "text",
+    fontWeight: 800
   },
   greetingBody: {
-    fontSize: "13px",
-    color: "#444",
-    lineHeight: 1.5,
-    margin: 0,
+    fontSize: "13.5px",
+    color: "#3c3c3c",
+    lineHeight: 1.55,
+    margin: "2px 0 0 0",
     maxWidth: "280px"
   },
   greetingSubtle: {
     fontSize: "12px",
-    color: "#888",
-    lineHeight: 1.5,
+    color: "#8a8a8a",
+    lineHeight: 1.55,
     margin: 0,
-    maxWidth: "260px"
+    maxWidth: "260px",
+    fontStyle: "italic"
   },
-  greetingNameDisplay: {
-    display: "inline-flex",
-    alignItems: "baseline",
+  greetingEmphasis: {
+    color: "#0a66c2",
+    fontStyle: "normal",
+    fontWeight: 600
+  },
+  greetingHint: {
+    fontSize: "11px",
+    color: "#9aa1a8",
+    margin: "8px 0 0 0",
+    letterSpacing: "0.01em"
+  },
+  greetingName: {
+    display: "inline-block",
     cursor: "pointer",
     color: "#0d0d0d",
-    fontWeight: 700,
-    borderBottom: "1px dashed transparent",
-    transition: "border-bottom-color 0.15s",
-    paddingBottom: "1px"
-  },
-  greetingNamePencil: {
-    fontSize: "13px",
-    marginLeft: "4px",
-    transition: "opacity 0.15s",
-    color: "#0a66c2",
-    fontWeight: 400
+    fontWeight: 800,
+    padding: "1px 8px",
+    margin: "0 1px",
+    borderRadius: "8px",
+    transition: "background-color 0.15s ease"
   },
   greetingNameInput: {
-    fontSize: "24px",
-    fontWeight: 700,
+    fontSize: "26px",
+    fontWeight: 800,
     color: "#0d0d0d",
     border: "none",
-    borderBottom: "2px solid #0a66c2",
+    borderBottom: "2px solid #9bb6dc",
     background: "transparent",
     outline: "none",
     width: "120px",
-    padding: 0,
-    margin: 0,
+    padding: "1px 4px",
+    margin: "0 1px",
     fontFamily: "inherit",
     textAlign: "center",
-    letterSpacing: "-0.01em"
+    letterSpacing: "-0.02em",
+    transition: "border-bottom-color 0.15s ease"
+  },
+  greetingEditIcon: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "26px",
+    height: "26px",
+    marginLeft: "8px",
+    color: "#0a66c2",
+    cursor: "pointer",
+    borderRadius: "50%",
+    transition: "opacity 0.18s ease, transform 0.18s ease, background-color 0.15s",
+    backgroundColor: "rgba(10, 102, 194, 0.10)"
   },
   nameSetupRow: {
     display: "flex",
     gap: "8px",
-    marginTop: "12px",
+    marginTop: "16px",
     width: "100%",
-    maxWidth: "280px"
+    maxWidth: "300px"
   },
   nameSetupInput: {
     flex: 1,
-    padding: "10px 14px",
+    padding: "11px 16px",
     fontSize: "14px",
-    border: "1px solid #ddd",
-    borderRadius: "20px",
+    border: "1px solid #d8dee5",
+    borderRadius: "10px",
     outline: "none",
-    textAlign: "center",
+    textAlign: "left",
     fontFamily: "inherit",
-    boxSizing: "border-box"
+    boxSizing: "border-box",
+    color: "#1a1a1a",
+    transition: "border-color 0.15s ease, box-shadow 0.15s ease"
   },
   nameSetupButton: {
-    padding: "10px 20px",
+    padding: "11px 22px",
     backgroundColor: "#0a66c2",
     color: "#fff",
     border: "none",
-    borderRadius: "20px",
+    borderRadius: "10px",
     fontSize: "14px",
-    fontWeight: 600
+    fontWeight: 600,
+    letterSpacing: "0.01em",
+    transition: "background-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease"
   },
   statusCentered: {
     display: "flex",
