@@ -292,6 +292,136 @@ if (!document.querySelector("[data-lr-sync-styles]")) {
   document.head.appendChild(spinnerStyle)
 }
 
+// --- Consultant Name Header ---
+
+function ConsultantNameHeader() {
+  const [name, setName] = useStorage<string>(
+    { key: "consultantFirstName", instance: localStore },
+    ""
+  )
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState("")
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const startEdit = () => {
+    setDraft(name ?? "")
+    setEditing(true)
+    setTimeout(() => inputRef.current?.focus(), 0)
+  }
+
+  const confirmEdit = () => {
+    const trimmed = draft.trim()
+    if (!trimmed) return // reject empty submission, stay in edit mode
+    setName(trimmed)
+    setEditing(false)
+  }
+
+  const cancelEdit = () => {
+    setEditing(false)
+    setDraft("")
+  }
+
+  if (editing) {
+    return (
+      <div style={consultantStyles.headerRow}>
+        <input
+          ref={inputRef}
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") confirmEdit()
+            else if (e.key === "Escape") cancelEdit()
+          }}
+          onBlur={cancelEdit}
+          placeholder="First name"
+          style={consultantStyles.headerInput}
+        />
+        <button
+          onMouseDown={(e) => {
+            e.preventDefault()
+            confirmEdit()
+          }}
+          style={consultantStyles.headerConfirm}>
+          Confirm
+        </button>
+      </div>
+    )
+  }
+
+  const hasName = !!(name && name.trim())
+  return (
+    <div style={consultantStyles.headerRow}>
+      <button
+        onClick={startEdit}
+        style={hasName ? consultantStyles.headerSet : consultantStyles.headerUnset}
+        title="Click to edit your name">
+        <span>{hasName ? name : "Add your name"}</span>
+        <span style={consultantStyles.headerEditIcon}>✎</span>
+      </button>
+    </div>
+  )
+}
+
+const consultantStyles: Record<string, React.CSSProperties> = {
+  headerRow: {
+    width: "100%",
+    display: "flex",
+    justifyContent: "flex-start",
+    alignItems: "center",
+    gap: "6px",
+    marginBottom: "-12px"
+  },
+  headerSet: {
+    background: "#fff",
+    border: "1px solid #e0e0e0",
+    borderRadius: "12px",
+    padding: "4px 10px",
+    fontSize: "11px",
+    fontWeight: 500,
+    color: "#444",
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "6px"
+  },
+  headerUnset: {
+    background: "#fafafa",
+    border: "1px dashed #ccc",
+    borderRadius: "12px",
+    padding: "4px 10px",
+    fontSize: "11px",
+    fontStyle: "italic",
+    color: "#999",
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "6px"
+  },
+  headerEditIcon: {
+    fontSize: "10px",
+    opacity: 0.6
+  },
+  headerInput: {
+    padding: "4px 8px",
+    fontSize: "12px",
+    border: "1px solid #0a66c2",
+    borderRadius: "12px",
+    outline: "none",
+    width: "120px"
+  },
+  headerConfirm: {
+    padding: "4px 10px",
+    fontSize: "11px",
+    fontWeight: 500,
+    color: "#fff",
+    background: "#0a66c2",
+    border: "none",
+    borderRadius: "12px",
+    cursor: "pointer"
+  }
+}
+
 // --- Main Component ---
 
 function SidePanel() {
@@ -609,6 +739,7 @@ function SidePanel() {
 
   return (
     <div style={styles.container}>
+      <ConsultantNameHeader />
       {showResetButton && (
         <div style={styles.resetBar}>
           <button onClick={handleReset} style={styles.resetButton} title="Clear all extension state and start over">
