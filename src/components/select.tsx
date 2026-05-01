@@ -142,6 +142,10 @@ if (
       font-family: inherit;
       transition: background-color 80ms ease;
     }
+    .lr-select-wrapper--inline .lr-select-option {
+      font-size: 13px;
+      font-weight: 600;
+    }
     .lr-select-option[data-highlighted="true"] {
       background-color: #f4f6f8;
     }
