@@ -71,6 +71,10 @@ if (
       border-bottom-right-radius: 0;
       border-right-color: transparent;
     }
+    .lr-select-trigger[data-attached="right"][data-open="true"],
+    .lr-select-trigger[data-attached="right"]:focus-visible {
+      box-shadow: none;
+    }
 
     .lr-select-trigger--pill {
       width: auto;
@@ -106,6 +110,8 @@ if (
       position: absolute;
       z-index: 500;
       margin-top: 6px;
+      left: 0;
+      width: calc(100% + var(--lr-select-panel-extend, 0px));
       min-width: 100%;
       max-height: 240px;
       overflow-y: auto;
@@ -185,6 +191,24 @@ function ChevronIcon({ open }: { open: boolean }) {
       strokeLinejoin="round"
       aria-hidden="true">
       <polyline points="6 9 12 15 18 9" />
+    </svg>
+  )
+}
+
+function PlusMinusIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true">
+      <line x1="5" y1="12" x2="19" y2="12" />
+      {!open && <line x1="12" y1="5" x2="12" y2="19" />}
     </svg>
   )
 }
@@ -405,7 +429,11 @@ export function Menu<T extends string>({
         aria-haspopup="menu"
         aria-expanded={open}>
         <span className="lr-select-option-label">{triggerLabel}</span>
-        <ChevronIcon open={open} />
+        {size === "pill" ? (
+          <PlusMinusIcon open={open} />
+        ) : (
+          <ChevronIcon open={open} />
+        )}
       </button>
       {open && (
         <div className="lr-select-panel" role="menu">

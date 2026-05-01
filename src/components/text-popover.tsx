@@ -124,36 +124,60 @@ if (
       transform: translateY(1px);
     }
 
+    /* Wrapper for the integrated [Select] | [pencil] picker. Owns the
+       focus-within ring so keyboard focus on either child glows the whole
+       unit; uses :has() to mirror the ring while the dropdown is open. */
+    .lr-text-picker-integrated {
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+      border-radius: 8px;
+      --lr-select-panel-extend: 43px;
+      transition: box-shadow 120ms ease;
+    }
+    .lr-text-picker-integrated:focus-within,
+    .lr-text-picker-integrated:has(.lr-select-trigger[data-open="true"]) {
+      box-shadow: 0 0 0 3px rgba(10,102,194,0.15);
+    }
+
+    .lr-text-picker-divider {
+      width: 1px;
+      align-self: stretch;
+      background-color: #0a66c2;
+      flex-shrink: 0;
+      display: block;
+    }
+
     .lr-text-edit-btn {
       width: 42px;
       flex-shrink: 0;
       align-self: stretch;
       background-color: transparent;
       color: #0a66c2;
-      border: 1px solid #0a66c2;
+      border-top: 1px solid #0a66c2;
+      border-right: 1px solid #0a66c2;
+      border-bottom: 1px solid #0a66c2;
+      border-left: none;
       border-top-left-radius: 0;
       border-bottom-left-radius: 0;
       border-top-right-radius: 8px;
       border-bottom-right-radius: 8px;
-      margin-left: -1px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       cursor: pointer;
       padding: 0;
-      transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+      transition: background-color 120ms ease, color 120ms ease, transform 120ms ease;
     }
     .lr-text-edit-btn:hover {
       background-color: #0a66c2;
       color: #ffffff;
-      box-shadow: 0 2px 6px rgba(10,102,194,0.32);
     }
     .lr-text-edit-btn:active {
       transform: translateY(1px);
     }
     .lr-text-edit-btn:focus-visible {
       outline: none;
-      box-shadow: 0 0 0 3px rgba(10,102,194,0.25);
     }
 
     /* ----- Textarea ----- */
@@ -455,7 +479,7 @@ export function TextPopover({
         </header>
         <div style={popoverStyles.pickerColumn}>
           <span style={popoverStyles.pickerLabel}>TEMPLATE</span>
-          <div style={popoverStyles.pickerRow}>
+          <div className="lr-text-picker-integrated">
             <div style={{ flex: 1, minWidth: 0 }}>
               <Select<string>
                 value={selectedTemplateId}
@@ -465,6 +489,7 @@ export function TextPopover({
                 options={templates.map((t) => ({ value: t.id, label: t.name }))}
               />
             </div>
+            <span className="lr-text-picker-divider" aria-hidden="true" />
             <button
               type="button"
               onClick={() => setManagerOpen(true)}
@@ -574,9 +599,4 @@ const popoverStyles: Record<string, React.CSSProperties> = {
     textTransform: "uppercase",
     margin: "0 0 6px 0"
   },
-  pickerRow: {
-    display: "flex",
-    alignItems: "stretch",
-    gap: 0
-  }
 }

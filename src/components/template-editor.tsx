@@ -409,7 +409,7 @@ export function TemplateEditor({
         <div style={editorStyles.variableRow}>
           <Menu<TemplateVariable>
             options={VARIABLE_OPTIONS}
-            triggerLabel="+ Add Variable"
+            triggerLabel="Add Variable"
             onSelect={insertVariable}
             size="pill"
           />
