@@ -7,3 +7,5 @@ export const localStore = new Storage({ area: "local" })
 export const COLD_CALL_TYPE = "cold_call"
 
 export const UNDO_DELAY_MS = 5000
+
+export const TEMPLATES_STORAGE_KEY = "lrSmsTemplates"

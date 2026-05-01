@@ -189,3 +189,15 @@ export type TextSlot = {
 // --- Outcome / cold call ---
 
 export type OutcomeTone = "positive" | "neutral" | "negative"
+
+// --- SMS templates ---
+
+export interface SmsTemplate {
+  id: string
+  name: string
+  body: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type TemplateVariable = "firstName"
