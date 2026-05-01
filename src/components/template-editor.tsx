@@ -41,8 +41,8 @@ if (
     .lr-tmpl-popover {
       width: 100%;
       max-width: 100%;
-      height: 45vh;
-      min-height: 360px;
+      height: 55vh;
+      min-height: 400px;
       background-color: #ffffff;
       border: 1px solid #e3e6ea;
       border-radius: 18px;
@@ -390,15 +390,6 @@ export function TemplateEditor({
           </button>
         </header>
 
-        <div style={editorStyles.variableRow}>
-          <Menu<TemplateVariable>
-            options={VARIABLE_OPTIONS}
-            triggerLabel="+ Add Variable"
-            onSelect={insertVariable}
-            size="pill"
-          />
-        </div>
-
         <span style={editorStyles.fieldLabel}>TEMPLATE NAME</span>
         <input
           ref={nameRef}
@@ -415,6 +406,15 @@ export function TemplateEditor({
         />
         {nameError && <p style={editorStyles.errorText}>Name is required</p>}
 
+        <div style={editorStyles.variableRow}>
+          <Menu<TemplateVariable>
+            options={VARIABLE_OPTIONS}
+            triggerLabel="+ Add Variable"
+            onSelect={insertVariable}
+            size="pill"
+          />
+        </div>
+
         <textarea
           ref={bodyRef}
           className={
@@ -425,7 +425,6 @@ export function TemplateEditor({
           onChange={(e) => setBody(e.target.value)}
           placeholder="Hi {{firstName}}, …"
           aria-invalid={bodyError ? "true" : undefined}
-          style={editorStyles.bodyInputWrap}
         />
         {bodyError && <p style={editorStyles.errorText}>Body is required</p>}
 
@@ -505,7 +504,7 @@ const editorStyles: Record<string, React.CSSProperties> = {
   variableRow: {
     display: "flex",
     alignItems: "center",
-    margin: "0 0 14px 0"
+    margin: "14px 0 12px 0"
   },
   fieldLabel: {
     fontSize: "12px",
@@ -515,9 +514,6 @@ const editorStyles: Record<string, React.CSSProperties> = {
     textTransform: "uppercase",
     margin: "0 0 6px 0",
     display: "block"
-  },
-  bodyInputWrap: {
-    margin: "14px 0 0 0"
   },
   errorText: {
     margin: "6px 0 0 0",

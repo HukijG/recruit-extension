@@ -87,8 +87,8 @@ if (
     .lr-text-popover {
       width: 100%;
       max-width: 100%;
-      height: 45vh;
-      min-height: 360px;
+      height: 55vh;
+      min-height: 400px;
       background-color: #ffffff;
       border: 1px solid #e3e6ea;
       border-radius: 18px;
