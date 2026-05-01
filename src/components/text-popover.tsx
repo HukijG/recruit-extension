@@ -1,3 +1,4 @@
+import { sendToBackground } from "@plasmohq/messaging"
 import { useEffect, useRef, useState } from "react"
 
 import { useStorage } from "@plasmohq/storage/hook"
@@ -283,6 +284,21 @@ if (
       box-shadow: 0 2px 6px rgba(31,157,85,0.32);
     }
     .lr-text-confirm-yes:active { transform: translateY(1px); }
+    .lr-text-confirm-yes:disabled,
+    .lr-text-confirm-no:disabled {
+      background-color: #eef0f2;
+      color: #98a2ad;
+      border-color: #e3e6ea;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+    .lr-text-confirm-yes:disabled:hover,
+    .lr-text-confirm-no:disabled:hover {
+      background-color: #eef0f2;
+      color: #98a2ad;
+      border-color: #e3e6ea;
+      box-shadow: none;
+    }
   `
   document.head.appendChild(styleEl)
 }
@@ -404,9 +420,15 @@ export function TextPopover({
   const [confirming, setConfirming] = useState(false)
   const [managerOpen, setManagerOpen] = useState(false)
   const [selectedTemplateId, setSelectedTemplateId] = useState("")
+  const [sendState, setSendState] = useState<"idle" | "sending">("idle")
+  const [sendError, setSendError] = useState<string | null>(null)
   const [stored] = useStorage<SmsTemplate[]>(
     { key: TEMPLATES_STORAGE_KEY, instance: localStore },
     []
+  )
+  const [extensionSecret] = useStorage<string>(
+    { key: "extensionSecret", instance: localStore },
+    ""
   )
   const templates = [...(stored ?? [])].sort((a, b) =>
     b.updatedAt.localeCompare(a.updatedAt)
@@ -443,17 +465,35 @@ export function TextPopover({
     }
   }, [templates, selectedTemplateId])
 
-  const handleYes = () => {
-    // Backend wiring deferred; surface the payload that will eventually go to
-    // the middleware so we can sanity-check what it'll receive.
-    // eslint-disable-next-line no-console
-    console.log("[TextPopover] would send:", {
-      fullName,
-      phoneNumber,
-      callerAliasId,
-      text: trimmed
-    })
-    onClose()
+  const handleYes = async () => {
+    if (sendState === "sending") return
+    setSendState("sending")
+    setSendError(null)
+
+    type SmsResp = { ok: boolean; error?: string }
+    const resp = await sendToBackground<unknown, SmsResp>({
+      name: "sendDialpadSms",
+      body: {
+        phoneNumber,
+        callerAliasId,
+        text,
+        secret: extensionSecret
+      }
+    }).catch(
+      (err): SmsResp => ({
+        ok: false,
+        error: err?.message ?? "Network error"
+      })
+    )
+
+    if (resp?.ok) {
+      onClose()
+      return
+    }
+
+    console.warn("[TextPopover] sendDialpadSms failed:", resp?.error)
+    setSendState("idle")
+    setSendError(resp?.error ?? "Couldn't send — try again")
   }
 
   // No backdrop click handler — the only close path is the X button, per
@@ -510,18 +550,23 @@ export function TextPopover({
           {confirming ? (
             <div style={popoverStyles.confirmBlock}>
               <p style={popoverStyles.confirmPrompt}>Are you sure?</p>
+              {sendError && (
+                <p style={popoverStyles.errorPrompt}>{sendError}</p>
+              )}
               <div style={popoverStyles.confirmButtons}>
                 <button
                   type="button"
                   onClick={handleNo}
+                  disabled={sendState === "sending"}
                   className="lr-text-confirm-no">
                   No
                 </button>
                 <button
                   type="button"
                   onClick={handleYes}
+                  disabled={sendState === "sending"}
                   className="lr-text-confirm-yes">
-                  Yes
+                  {sendState === "sending" ? "Sending…" : "Yes"}
                 </button>
               </div>
             </div>
@@ -571,6 +616,14 @@ const popoverStyles: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     alignItems: "stretch",
     gap: "10px"
+  },
+  errorPrompt: {
+    margin: 0,
+    fontSize: "13px",
+    fontWeight: 500,
+    color: "#a82a20",
+    textAlign: "center",
+    lineHeight: 1.3
   },
   confirmPrompt: {
     margin: 0,
