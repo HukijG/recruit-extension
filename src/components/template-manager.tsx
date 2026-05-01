@@ -72,6 +72,10 @@ if (
     .lr-tmgr-back-btn:active {
       transform: translateY(1px);
     }
+    .lr-tmgr-back-btn:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(10,102,194,0.15);
+    }
 
     .lr-tmgr-add-btn {
       flex-shrink: 0;
@@ -97,6 +101,10 @@ if (
     }
     .lr-tmgr-add-btn:active {
       transform: translateY(1px);
+    }
+    .lr-tmgr-add-btn:focus-visible {
+      outline: none;
+      box-shadow: 0 2px 6px rgba(10,102,194,0.32), 0 0 0 3px rgba(10,102,194,0.15);
     }
 
     .lr-tmgr-list {
@@ -180,6 +188,14 @@ if (
     }
     .lr-tmgr-icon-btn:active {
       transform: translateY(1px);
+    }
+    .lr-tmgr-icon-btn--edit:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(10,102,194,0.25);
+    }
+    .lr-tmgr-icon-btn--delete:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(210,58,44,0.25);
     }
 
     .lr-tmgr-card-confirm {

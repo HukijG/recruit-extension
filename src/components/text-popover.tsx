@@ -141,6 +141,10 @@ if (
     .lr-text-edit-btn:active {
       transform: translateY(1px);
     }
+    .lr-text-edit-btn:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(10,102,194,0.25);
+    }
 
     /* ----- Textarea ----- */
     .lr-text-input {
