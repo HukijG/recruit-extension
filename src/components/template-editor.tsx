@@ -497,13 +497,14 @@ const editorStyles: Record<string, React.CSSProperties> = {
     margin: 0,
     fontSize: "19px",
     fontWeight: 700,
-    lineHeight: 1.2,
+    lineHeight: 1,
     color: "#15171a",
     letterSpacing: "-0.01em"
   },
   variableRow: {
     display: "flex",
     alignItems: "center",
+    justifyContent: "flex-end",
     margin: "14px 0 12px 0"
   },
   fieldLabel: {

@@ -85,6 +85,7 @@ if (
       font-size: 13px;
       font-weight: 600;
       gap: 6px;
+      line-height: 1;
     }
     .lr-select-trigger--pill:hover {
       background-color: #e6efff;
