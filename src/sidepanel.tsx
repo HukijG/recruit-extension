@@ -1,6 +1,6 @@
 import { sendToBackground } from "@plasmohq/messaging"
 import { useStorage } from "@plasmohq/storage/hook"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import {
   CandidateView,
@@ -23,8 +23,16 @@ import {
   styles
 } from "~components/sync"
 import { TestCallView } from "~components/test-call"
+import { TextPopover } from "~components/text-popover"
 import { localStore, UNDO_DELAY_MS } from "~lib/constants"
+import {
+  CallConfigContext,
+  CallerIdPickerContext,
+  TextSlotContext
+} from "~lib/contexts"
+import type { DialpadUserContext } from "~lib/dialpad"
 import type {
+  CallConfig,
   Candidate,
   CandidateDetails,
   CandidateResult,
@@ -32,6 +40,7 @@ import type {
   MatchedCandidate,
   PageInfo,
   RFJob,
+  UserContextState,
   WorkflowState
 } from "~lib/types"
 
@@ -510,6 +519,83 @@ function SidePanel() {
     }
   }, [mode, candidateUrlId, fetchCandidate])
 
+  // --- Candidate-mode SMS / call surfaces ---
+  //
+  // These were previously test-call-only via TestCallView. Lifted up here so
+  // production candidate-mode (real LinkedIn Recruiter profile sidepanel)
+  // gets the full surface: caller-ID picker inside the identity card, Text
+  // button on the action row, full template manager + editor flow, and
+  // /dialpad-sms send. Storage of the picked alias is per-session
+  // (selectedCallerAliasId state); not persisted across reloads on purpose
+  // — the user re-confirms which number they're calling/texting from each
+  // time the panel mounts.
+  const [contextState, setContextState] = useState<UserContextState>({
+    status: "loading"
+  })
+  const [selectedCallerAliasId, setSelectedCallerAliasId] = useState<string>("")
+  const [textPopoverOpen, setTextPopoverOpen] = useState(false)
+
+  // Fetch /dialpad-user-context once whenever we enter candidate mode. The
+  // middleware response is small (devices + caller IDs aliased), and this
+  // happens at most once per panel session per candidate-mode entry.
+  useEffect(() => {
+    if (mode !== "candidate") {
+      setContextState({ status: "loading" })
+      setTextPopoverOpen(false)
+      return
+    }
+    let cancelled = false
+    type CtxResp = {
+      ok: boolean
+      data?: DialpadUserContext
+      error?: string
+    }
+    sendToBackground<unknown, CtxResp>({
+      name: "getDialpadUserContext",
+      body: { secret: extensionSecret }
+    })
+      .then((resp) => {
+        if (cancelled) return
+        if (resp?.ok && resp.data) {
+          setContextState({ status: "ready", data: resp.data })
+          const defaultCaller =
+            resp.data.callerIds.find((c) => c.isDefault) ??
+            resp.data.callerIds[0]
+          if (defaultCaller) setSelectedCallerAliasId(defaultCaller.aliasId)
+        } else {
+          setContextState({
+            status: "error",
+            message: resp?.error ?? "Failed to load Dialpad context"
+          })
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setContextState({
+          status: "error",
+          message: err?.message ?? "Failed to load Dialpad context"
+        })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [mode, extensionSecret])
+
+  // Close any open SMS popover when the user navigates to a different
+  // candidate so the popover never shows stale fullName/phoneNumber.
+  useEffect(() => {
+    setTextPopoverOpen(false)
+  }, [candidateUrlId])
+
+  const textSlot = useMemo(
+    () => ({ onOpen: () => setTextPopoverOpen(true) }),
+    []
+  )
+
+  const callConfig: CallConfig = {
+    callerAliasId: selectedCallerAliasId || undefined
+  }
+
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [errorToast, setErrorToast] = useState<string | null>(null)
 
@@ -763,13 +849,34 @@ function SidePanel() {
     <div style={styles.container}>
       {mode === "candidate" && (
         <>
-          <CandidateView
-            state={candidateState}
-            onRetry={() => candidateUrlId && fetchCandidate(candidateUrlId)}
-            onArmMarkInvalid={handleArmMarkInvalid}
-            onUndoMarkInvalid={handleUndoMarkInvalid}
-            onRetryMarkInvalid={handleRetryMarkInvalid}
-          />
+          <CallConfigContext.Provider value={callConfig}>
+            <CallerIdPickerContext.Provider
+              value={{
+                state: contextState,
+                selectedAliasId: selectedCallerAliasId,
+                onSelect: setSelectedCallerAliasId
+              }}>
+              <TextSlotContext.Provider value={textSlot}>
+                <CandidateView
+                  state={candidateState}
+                  onRetry={() =>
+                    candidateUrlId && fetchCandidate(candidateUrlId)
+                  }
+                  onArmMarkInvalid={handleArmMarkInvalid}
+                  onUndoMarkInvalid={handleUndoMarkInvalid}
+                  onRetryMarkInvalid={handleRetryMarkInvalid}
+                />
+              </TextSlotContext.Provider>
+            </CallerIdPickerContext.Provider>
+          </CallConfigContext.Provider>
+          {textPopoverOpen && candidateState.phase === "ready" && (
+            <TextPopover
+              fullName={candidateState.details.fullName}
+              phoneNumber={candidateState.details.phoneNumber}
+              callerAliasId={selectedCallerAliasId || undefined}
+              onClose={() => setTextPopoverOpen(false)}
+            />
+          )}
           {candidateState.phase === "ready" &&
             candidateState.markInvalid.status === "armed" && (
               <UndoToast
@@ -800,17 +907,6 @@ function SidePanel() {
             loadStatus={loadStatus}
             count={candidates.length}
           />
-
-          {process.env.NODE_ENV === "development" &&
-            workflowState === "not_on_pipeline" && (
-              <button
-                type="button"
-                onClick={() => setMode("test_call")}
-                style={styles.devTestCallButton}
-                title="Dev only — opens a mock candidate view to exercise the Dialpad API">
-                🧪 Open test call view
-              </button>
-            )}
 
           {workflowState === "profiles_selected" && (
             <button onClick={handleSync} style={styles.syncButton}>
