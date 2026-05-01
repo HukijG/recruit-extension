@@ -478,7 +478,8 @@ function SidePanel() {
         setCandidateState({
           phase: "error",
           urlId,
-          message: "Could not read profile URL from page"
+          message:
+            "Couldn't read LinkedIn profile on candidate sidepanel — try refreshing"
         })
         return
       }

@@ -390,20 +390,28 @@ function getSelectedCandidates(): GetSelectedCandidatesResponse {
 
 // --- Candidate sidepanel: profile URL extraction ---
 
-// The LinkedIn candidate sidepanel hydrates after the URL changes; the profile
-// link element may not be present immediately. Poll briefly for it. No fixed
-// waits on the happy path — returns the moment the element appears.
+// The LinkedIn candidate sidepanel hydrates after the URL changes; the
+// profile-link element can take anywhere from <50ms (fast network, hot
+// cache) to several seconds (cold cache, slow network) to render. We
+// previously bounded retry at ~1 second which raced fast PCs into a
+// "couldn't read profile URL" error before LinkedIn was done hydrating.
+//
+// Strategy: poll on a 50ms cadence and bail at 10s wall-clock. Fast loads
+// return almost instantly (the first iteration already does an immediate
+// querySelector before the first sleep), and slow loads get caught
+// without forcing the user to retry.
 async function findCandidateProfileUrl(): Promise<string | null> {
-  const MAX_ATTEMPTS = 20
-  const DELAY_MS = 50
-  for (let i = 0; i < MAX_ATTEMPTS; i++) {
+  const MAX_WAIT_MS = 10_000
+  const POLL_INTERVAL_MS = 50
+  const deadline = Date.now() + MAX_WAIT_MS
+  while (Date.now() < deadline) {
     const link = document.querySelector(
       "a[data-test-personal-info-profile-link]"
     ) as HTMLAnchorElement | null
     if (link?.href) {
       return link.href
     }
-    await new Promise((r) => setTimeout(r, DELAY_MS))
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
   }
   return null
 }
