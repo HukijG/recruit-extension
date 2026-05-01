@@ -1,6 +1,6 @@
 import { sendToBackground } from "@plasmohq/messaging"
 import { useStorage } from "@plasmohq/storage/hook"
-import { useContext, useEffect, useMemo, useRef, useState } from "react"
+import { useContext, useEffect, useMemo, useState } from "react"
 
 import { Select } from "~components/select"
 import { TextButton } from "~components/text-popover"
@@ -9,6 +9,7 @@ import { COLD_CALL_TYPE, localStore } from "~lib/constants"
 import {
   CallConfigContext,
   CallerIdPickerContext,
+  CallStreamContext,
   TextSlotContext
 } from "~lib/contexts"
 import {
@@ -134,12 +135,21 @@ function PhoneNumberLabel({ phoneNumber }: { phoneNumber: string | null }) {
   )
 }
 
+// Receiver path used by both Call (upright) and Hangup (rotated). Spans
+// roughly (4,2)→(22,22) inside its 24×24 viewBox, so a naive 135° rotation
+// pushes the corners outside the frame and the icon visually competes with
+// "Hangup"'s 6-character label. We render at 14×14 (matching Call) and
+// shrink the path to 0.85 around the centre before rotating, so the rotated
+// receiver fits inside its render area without cropping.
+const RECEIVER_PATH =
+  "M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"
+
 function CallIcon() {
   return (
     <svg
       className="lr-call-icon"
-      width="16"
-      height="16"
+      width="14"
+      height="14"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -147,74 +157,106 @@ function CallIcon() {
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true">
-      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+      <path d={RECEIVER_PATH} />
     </svg>
   )
 }
 
-type CallState =
-  | { kind: "idle" }
-  | { kind: "calling" }
-  | { kind: "ringing" }
-  | { kind: "error"; message: string }
-  | { kind: "rate_limited"; resumeAt: number; message: string }
+function HangupIcon() {
+  return (
+    <svg
+      className="lr-call-icon"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true">
+      {/* Receiver rotated 135° — the conventional hangup glyph. The inner
+          group scales the path to 0.85 around (12,12) before the outer
+          rotation so the diagonal extents stay inside the viewBox. */}
+      <g transform="rotate(135 12 12)">
+        <g transform="translate(12 12) scale(0.85) translate(-12 -12)">
+          <path d={RECEIVER_PATH} />
+        </g>
+      </g>
+    </svg>
+  )
+}
+
+type CallRespEnvelope = {
+  ok: boolean
+  error?: string
+  reason?: "duplicate" | "rate_limit"
+  retryAfterSec?: number
+}
+
+type HangupRespEnvelope = {
+  ok: boolean
+  error?: string
+  status?: number
+}
+
+// E.164-ish equality: strip everything except digits and a leading +.
+// Recruiterflow and the middleware both produce E.164, but defensive
+// normalization protects against drift (spaces, parens, dashes).
+function samePhone(a: string | null, b: string | null): boolean {
+  if (!a || !b) return false
+  const norm = (s: string) => s.replace(/[^\d+]/g, "")
+  return norm(a) === norm(b)
+}
 
 function CallButton({ phoneNumber }: { phoneNumber: string | null }) {
   const callConfig = useContext(CallConfigContext)
+  const callStream = useContext(CallStreamContext)
   const [extensionSecret] = useStorage<string>(
     { key: "extensionSecret", instance: localStore },
     ""
   )
-  const [callState, setCallState] = useState<CallState>({ kind: "idle" })
+
+  // Local overlays — kept narrow so candidate switches (which remount this
+  // component via CandidateView's phase transitions) wipe the slate. By
+  // request: no "retry" labels, no error flashes; failures revert silently
+  // to the default Call surface.
+  const [rateLimit, setRateLimit] = useState<{
+    resumeAt: number
+    message: string
+  } | null>(null)
+  const [hangupPending, setHangupPending] = useState(false)
   const [, setTick] = useState(0)
-  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Drives the rate-limited countdown. Re-renders ~every 250ms so the visible
+  // "Try again in Xs" label decrements; auto-flips off when the window
+  // elapses.
   useEffect(() => {
-    return () => {
-      if (resetTimerRef.current) clearTimeout(resetTimerRef.current)
-    }
-  }, [])
-
-  // Drives the rate-limited countdown. Re-renders ~every 250ms while in the
-  // rate_limited phase so the visible "Try again in Xs" label decrements.
-  // Auto-flips back to idle when the wait window elapses.
-  useEffect(() => {
-    if (callState.kind !== "rate_limited") return
+    if (!rateLimit) return
     const id = setInterval(() => {
-      if (Date.now() >= callState.resumeAt) {
-        setCallState({ kind: "idle" })
+      if (Date.now() >= rateLimit.resumeAt) {
+        setRateLimit(null)
       } else {
         setTick((t) => t + 1)
       }
     }, 250)
     return () => clearInterval(id)
-  }, [callState])
+  }, [rateLimit])
 
-  if (!phoneNumber) {
-    return (
-      <button type="button" disabled className="lr-call-btn" aria-label="Call (no phone on file)">
-        <CallIcon />
-        Call
-      </button>
-    )
-  }
+  const status = callStream?.state.status ?? "idle"
+  // Phone-match gates the Calling…/Hangup affordances to THIS candidate's
+  // page. If the active call is for a different candidate, this view shows
+  // plain Call — never inherits another candidate's call UI.
+  const isThisCandidatesCall = samePhone(
+    callStream?.state.phoneNumber ?? null,
+    phoneNumber
+  )
 
-  const scheduleReset = (ms: number) => {
-    if (resetTimerRef.current) clearTimeout(resetTimerRef.current)
-    resetTimerRef.current = setTimeout(() => setCallState({ kind: "idle" }), ms)
-  }
+  const handleCallClick = async () => {
+    if (!phoneNumber) return
+    callStream?.beginLocalCalling(phoneNumber)
 
-  const handleClick = async () => {
-    if (callState.kind === "calling" || callState.kind === "rate_limited") return
-    setCallState({ kind: "calling" })
-
-    type CallResp = {
-      ok: boolean
-      error?: string
-      reason?: "duplicate" | "rate_limit"
-      retryAfterSec?: number
-    }
-    const resp = await sendToBackground<unknown, CallResp>({
+    const resp = await sendToBackground<unknown, CallRespEnvelope>({
       name: "initiateDialpadCall",
       body: {
         phoneNumber,
@@ -222,17 +264,20 @@ function CallButton({ phoneNumber }: { phoneNumber: string | null }) {
         secret: extensionSecret
       }
     }).catch(
-      (err): CallResp => ({
+      (err): CallRespEnvelope => ({
         ok: false,
         error: err?.message ?? "Network error"
       })
     )
 
     if (resp?.ok) {
-      setCallState({ kind: "ringing" })
-      scheduleReset(2500)
+      // 200 means the worker queued a watch + forwarded to Dialpad. Flip to
+      // `active` only when SSE delivers `state: active`. The hook's 15s
+      // watchdog reverts silently if Dialpad never confirms.
       return
     }
+
+    callStream?.cancelLocalCalling()
 
     // Middleware enforces both a back-to-back dedup window (reason: "duplicate",
     // 1-3s) and a 5/min rolling rate limit (reason: "rate_limit", 1-60s). Both
@@ -240,55 +285,121 @@ function CallButton({ phoneNumber }: { phoneNumber: string | null }) {
     // countdown so the user gets explicit feedback rather than a silent retry.
     if (resp?.reason === "duplicate" || resp?.reason === "rate_limit") {
       const sec = Math.max(1, resp.retryAfterSec ?? 30)
-      setCallState({
-        kind: "rate_limited",
+      setRateLimit({
         resumeAt: Date.now() + sec * 1000,
         message: resp.error ?? "Try again shortly"
       })
       return
     }
 
+    // Other failures revert silently — user sees the button back to Call
+    // and can try again. Logged for debugging; no user-facing retry label.
     console.warn("[CallButton] initiateDialpadCall failed:", resp?.error)
-    setCallState({ kind: "error", message: resp?.error ?? "Failed" })
-    scheduleReset(4000)
   }
 
-  let label: string
-  let titleAttr: string | undefined
-  switch (callState.kind) {
-    case "calling":
-      label = "Calling…"
-      break
-    case "ringing":
-      label = "Ringing"
-      break
-    case "error":
-      label = "Failed — retry"
-      titleAttr = callState.message
-      break
-    case "rate_limited": {
-      const remaining = Math.max(
-        0,
-        Math.ceil((callState.resumeAt - Date.now()) / 1000)
-      )
-      label = `Try again in ${remaining}s`
-      titleAttr = callState.message
-      break
+  const handleHangupClick = async () => {
+    if (hangupPending) return
+    setHangupPending(true)
+
+    const resp = await sendToBackground<unknown, HangupRespEnvelope>({
+      name: "dialpadHangup",
+      body: { secret: extensionSecret }
+    }).catch(
+      (err): HangupRespEnvelope => ({
+        ok: false,
+        error: err?.message ?? "Network error"
+      })
+    )
+
+    setHangupPending(false)
+
+    if (resp?.ok) {
+      // SSE will deliver `state: ended` once Dialpad fires its hangup event.
+      // No local optimistic transition — keeps multi-tab UI consistent.
+      return
     }
-    default:
-      label = "Call"
+
+    // 409 = "No active call" (Dialpad's calling event hadn't landed yet, or
+    // the call already terminated). All other failures: same silent revert.
+    // SSE will eventually reconcile state; the user can click Hangup again
+    // if the button is still red, or just wait for the state flip.
+    console.warn("[CallButton] dialpadHangup failed:", resp?.error)
+  }
+
+  // --- Rendering ---
+
+  // Active call belonging to this candidate → red Hangup. Active call to a
+  // different candidate is invisible from this view's perspective: render as
+  // plain Call so the consultant can dial this candidate normally.
+  if (status === "active" && isThisCandidatesCall) {
+    return (
+      <button
+        type="button"
+        onClick={handleHangupClick}
+        disabled={hangupPending}
+        className="lr-call-btn lr-call-btn--hangup"
+        aria-label="Hang up active call">
+        <HangupIcon />
+        {hangupPending ? "Hanging up…" : "Hangup"}
+      </button>
+    )
+  }
+
+  // 429 from /dialpad-call — user has to wait the full window before a new
+  // call attempt can land. Per-component state, so it dies on candidate
+  // switch (which is what we want — fresh button, fresh attempt).
+  if (rateLimit) {
+    const remaining = Math.max(
+      0,
+      Math.ceil((rateLimit.resumeAt - Date.now()) / 1000)
+    )
+    return (
+      <button
+        type="button"
+        disabled
+        className="lr-call-btn"
+        title={rateLimit.message}
+        aria-label={rateLimit.message}>
+        <CallIcon />
+        Try again in {remaining}s
+      </button>
+    )
+  }
+
+  if (status === "calling" && isThisCandidatesCall) {
+    return (
+      <button
+        type="button"
+        disabled
+        className="lr-call-btn"
+        aria-label="Calling — waiting for confirmation">
+        <CallIcon />
+        Calling…
+      </button>
+    )
+  }
+
+  if (!phoneNumber) {
+    return (
+      <button
+        type="button"
+        disabled
+        className="lr-call-btn"
+        aria-label="Call (no phone on file)">
+        <CallIcon />
+        Call
+      </button>
+    )
   }
 
   return (
     <button
       type="button"
-      onClick={handleClick}
-      disabled={callState.kind === "calling" || callState.kind === "rate_limited"}
+      onClick={handleCallClick}
       className="lr-call-btn"
-      title={titleAttr}
       aria-label={`Call ${phoneNumber}`}>
       <CallIcon />
-      {label}
+      Call
     </button>
   )
 }

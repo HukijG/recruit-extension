@@ -186,6 +186,32 @@ export type TextSlot = {
   onOpen: () => void
 } | null
 
+// --- Live call-state stream (SSE) ---
+
+// Mirrors the four wire states the worker pushes over /extension-call-stream.
+// `idle`/`ended` both render Call; `calling` renders Calling… (disabled);
+// `active` renders the red Hangup button.
+export type CallStreamStatus = "idle" | "calling" | "active" | "ended"
+
+export interface CallStreamState {
+  status: CallStreamStatus
+  // Candidate's E.164 number per the worker. Present on calling/active/ended,
+  // null on idle. Useful for cross-tab sanity-checking the active call.
+  phoneNumber: string | null
+}
+
+// Hook-shaped slot exposed via context so any view can read live state and
+// preempt with a local "calling" intent the moment /dialpad-call fires —
+// before SSE confirms `active`. The candidate's own phone number is required
+// when starting a local call so the per-candidate UI can phone-match against
+// state.phoneNumber and avoid showing Hangup/Calling on a different
+// candidate's profile.
+export type CallStreamSlot = {
+  state: CallStreamState
+  beginLocalCalling: (phoneNumber: string) => void
+  cancelLocalCalling: () => void
+} | null
+
 // --- Outcome / cold call ---
 
 export type OutcomeTone = "positive" | "neutral" | "negative"

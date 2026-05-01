@@ -24,10 +24,12 @@ import {
 } from "~components/sync"
 import { TestCallView } from "~components/test-call"
 import { TextPopover } from "~components/text-popover"
+import { useCallStream } from "~lib/callStream"
 import { localStore, UNDO_DELAY_MS } from "~lib/constants"
 import {
   CallConfigContext,
   CallerIdPickerContext,
+  CallStreamContext,
   TextSlotContext
 } from "~lib/contexts"
 import type { DialpadUserContext } from "~lib/dialpad"
@@ -188,6 +190,18 @@ sidepanelStyle.textContent = `
   }
   .lr-call-btn .lr-call-icon {
     flex-shrink: 0;
+  }
+
+  /* Red modifier for the Hangup state — same pill geometry, swapped colour
+     ramp. Applied when the live SSE call-state stream reports active. */
+  .lr-call-btn--hangup {
+    background-color: #d23a2c;
+    border-color: #d23a2c;
+  }
+  .lr-call-btn--hangup:hover {
+    background-color: #b8302a;
+    border-color: #b8302a;
+    box-shadow: 0 2px 6px rgba(210,58,44,0.32);
   }
 
   .lr-invalid-btn {
@@ -593,6 +607,24 @@ function SidePanel() {
     []
   )
 
+  // Live SSE call-state stream — opens once we have a consultantFirstName.
+  // Always-on for the whole sidepanel session so candidate-mode and
+  // test_call-mode share a single connection (the DO fan-out per consultant
+  // means multiple tabs/windows still see the same state).
+  const callStream = useCallStream()
+  const callStreamSlot = useMemo(
+    () => ({
+      state: callStream.state,
+      beginLocalCalling: callStream.beginLocalCalling,
+      cancelLocalCalling: callStream.cancelLocalCalling
+    }),
+    [
+      callStream.state,
+      callStream.beginLocalCalling,
+      callStream.cancelLocalCalling
+    ]
+  )
+
   const callConfig: CallConfig = {
     callerAliasId: selectedCallerAliasId || undefined
   }
@@ -849,7 +881,7 @@ function SidePanel() {
   return (
     <div style={styles.container}>
       {mode === "candidate" && (
-        <>
+        <CallStreamContext.Provider value={callStreamSlot}>
           <CallConfigContext.Provider value={callConfig}>
             <CallerIdPickerContext.Provider
               value={{
@@ -886,11 +918,13 @@ function SidePanel() {
               />
             )}
           {errorToast && <ErrorToast message={errorToast} />}
-        </>
+        </CallStreamContext.Provider>
       )}
 
       {mode === "test_call" && (
-        <TestCallView onExit={() => setMode("sync")} />
+        <CallStreamContext.Provider value={callStreamSlot}>
+          <TestCallView onExit={() => setMode("sync")} />
+        </CallStreamContext.Provider>
       )}
 
       {mode === "sync" && (
