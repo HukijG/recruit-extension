@@ -74,6 +74,10 @@ if (
       box-shadow: 0 2px 6px rgba(210,58,44,0.32);
     }
     .lr-tmpl-close-btn:active { transform: translateY(1px); }
+    .lr-tmpl-close-btn:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(210,58,44,0.25);
+    }
 
     .lr-tmpl-name-input {
       width: 100%;
@@ -162,6 +166,10 @@ if (
       box-shadow: 0 2px 6px rgba(31,157,85,0.32);
     }
     .lr-tmpl-save-btn:active { transform: translateY(1px); }
+    .lr-tmpl-save-btn:focus-visible {
+      outline: none;
+      box-shadow: 0 2px 6px rgba(31,157,85,0.32), 0 0 0 3px rgba(10,102,194,0.15);
+    }
 
     .lr-tmpl-confirm-no {
       flex: 1 1 0;
@@ -182,6 +190,10 @@ if (
       border-color: #aab1bb;
     }
     .lr-tmpl-confirm-no:active { transform: translateY(1px); }
+    .lr-tmpl-confirm-no:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(10,102,194,0.15);
+    }
 
     .lr-tmpl-confirm-yes {
       flex: 1 1 0;
@@ -204,6 +216,10 @@ if (
       box-shadow: 0 2px 6px rgba(31,157,85,0.32);
     }
     .lr-tmpl-confirm-yes:active { transform: translateY(1px); }
+    .lr-tmpl-confirm-yes:focus-visible {
+      outline: none;
+      box-shadow: 0 2px 6px rgba(31,157,85,0.32), 0 0 0 3px rgba(10,102,194,0.15);
+    }
 
     .lr-tmpl-discard-yes {
       flex: 1 1 0;
@@ -226,6 +242,10 @@ if (
       box-shadow: 0 2px 6px rgba(210,58,44,0.32);
     }
     .lr-tmpl-discard-yes:active { transform: translateY(1px); }
+    .lr-tmpl-discard-yes:focus-visible {
+      outline: none;
+      box-shadow: 0 2px 6px rgba(210,58,44,0.32), 0 0 0 3px rgba(10,102,194,0.15);
+    }
   `
   document.head.appendChild(styleEl)
 }
@@ -391,7 +411,7 @@ export function TemplateEditor({
           onChange={(e) => setName(e.target.value)}
           placeholder="e.g. Initial outreach"
           maxLength={80}
-          aria-invalid={nameError}
+          aria-invalid={nameError ? "true" : undefined}
         />
         {nameError && <p style={editorStyles.errorText}>Name is required</p>}
 
@@ -404,7 +424,7 @@ export function TemplateEditor({
           value={body}
           onChange={(e) => setBody(e.target.value)}
           placeholder="Hi {{firstName}}, …"
-          aria-invalid={bodyError}
+          aria-invalid={bodyError ? "true" : undefined}
           style={editorStyles.bodyInputWrap}
         />
         {bodyError && <p style={editorStyles.errorText}>Body is required</p>}
