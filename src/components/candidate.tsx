@@ -2,6 +2,7 @@ import { sendToBackground } from "@plasmohq/messaging"
 import { useStorage } from "@plasmohq/storage/hook"
 import { useContext, useEffect, useMemo, useRef, useState } from "react"
 
+import { Select } from "~components/select"
 import { TextButton } from "~components/text-popover"
 import { styles as syncStyles } from "~components/sync"
 import { COLD_CALL_TYPE, localStore } from "~lib/constants"
@@ -458,9 +459,7 @@ export function InlineCallerIdPicker({
 }) {
   return (
     <div style={candidateStyles.pickerInline}>
-      <label style={candidateStyles.pickerInlineLabel} htmlFor="lr-caller-id">
-        Outbound caller ID
-      </label>
+      <span style={candidateStyles.pickerInlineLabel}>Outbound caller ID</span>
       {state.status === "loading" && (
         <div style={candidateStyles.pickerInlineLoading}>Loading caller IDs…</div>
       )}
@@ -473,17 +472,14 @@ export function InlineCallerIdPicker({
         </div>
       )}
       {state.status === "ready" && state.data.callerIds.length > 0 && (
-        <select
-          id="lr-caller-id"
+        <Select<string>
           value={selectedAliasId}
-          onChange={(e) => onSelect(e.target.value)}
-          style={candidateStyles.pickerInlineSelect}>
-          {state.data.callerIds.map((c) => (
-            <option key={c.aliasId} value={c.aliasId}>
-              {formatCallerOption(c, state.data.callerIds)}
-            </option>
-          ))}
-        </select>
+          onChange={onSelect}
+          options={state.data.callerIds.map((c) => ({
+            value: c.aliasId,
+            label: formatCallerOption(c, state.data.callerIds)
+          }))}
+        />
       )}
     </div>
   )
@@ -582,16 +578,6 @@ const candidateStyles: Record<string, React.CSSProperties> = {
     color: "#3c4043",
     textTransform: "uppercase",
     textAlign: "left"
-  },
-  pickerInlineSelect: {
-    width: "100%",
-    padding: "6px 8px",
-    fontSize: "13px",
-    color: "#15171a",
-    backgroundColor: "#ffffff",
-    border: "1px solid #d6dbe1",
-    borderRadius: "8px",
-    fontFamily: "inherit"
   },
   pickerInlineLoading: {
     fontSize: "12px",
