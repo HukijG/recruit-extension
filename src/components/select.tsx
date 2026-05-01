@@ -66,6 +66,11 @@ if (
       border-color: #e3e6ea;
       cursor: not-allowed;
     }
+    .lr-select-trigger[data-attached="right"] {
+      border-top-right-radius: 0;
+      border-bottom-right-radius: 0;
+      border-right-color: transparent;
+    }
 
     .lr-select-trigger--pill {
       width: auto;
@@ -255,12 +260,14 @@ export function Select<T extends string>({
   options,
   value,
   onChange,
-  placeholder
+  placeholder,
+  attached
 }: {
   options: SelectOption<T>[]
   value: T | ""
   onChange: (value: T) => void
   placeholder?: string
+  attached?: "right"
 }) {
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -290,6 +297,7 @@ export function Select<T extends string>({
         type="button"
         className="lr-select-trigger"
         data-open={open}
+        data-attached={attached}
         onClick={() => setOpen((o) => !o)}
         onKeyDown={(e) => {
           if (e.key === "Enter") {

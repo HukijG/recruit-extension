@@ -125,13 +125,17 @@ if (
     }
 
     .lr-text-edit-btn {
-      width: 30px;
-      height: 30px;
+      width: 42px;
       flex-shrink: 0;
+      align-self: stretch;
       background-color: transparent;
       color: #0a66c2;
       border: 1px solid #0a66c2;
-      border-radius: 50%;
+      border-top-left-radius: 0;
+      border-bottom-left-radius: 0;
+      border-top-right-radius: 8px;
+      border-bottom-right-radius: 8px;
+      margin-left: -1px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -457,6 +461,7 @@ export function TextPopover({
                 value={selectedTemplateId}
                 onChange={handlePickTemplate}
                 placeholder="Choose template…"
+                attached="right"
                 options={templates.map((t) => ({ value: t.id, label: t.name }))}
               />
             </div>
@@ -571,7 +576,7 @@ const popoverStyles: Record<string, React.CSSProperties> = {
   },
   pickerRow: {
     display: "flex",
-    alignItems: "center",
-    gap: "10px"
+    alignItems: "stretch",
+    gap: 0
   }
 }
