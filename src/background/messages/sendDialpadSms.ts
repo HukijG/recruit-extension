@@ -49,12 +49,32 @@ const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
     })
 
     if (!resp.ok) {
-      let errorBody = ""
+      // Same envelope as /dialpad-call. /dialpad-sms doesn't emit 429 today
+      // but the middleware spec leaves room for it once production
+      // candidate-mode lights up; threading reason/retryAfterSec through now
+      // means the popover handles a future 429 without a second pass.
+      let body: any = null
       try {
-        errorBody = await resp.text()
+        body = await resp.json()
       } catch {}
-      const msg = `${resp.status} ${resp.statusText}${errorBody ? ": " + errorBody : ""}`
-      res.send({ ok: false, error: msg })
+      if (body && typeof body === "object" && typeof body.error === "string") {
+        res.send({
+          ok: false,
+          error: body.error,
+          reason: body.reason,
+          retryAfterSec:
+            typeof body.retryAfterSec === "number"
+              ? body.retryAfterSec
+              : undefined,
+          status: resp.status
+        })
+        return
+      }
+      res.send({
+        ok: false,
+        error: `${resp.status} ${resp.statusText}`,
+        status: resp.status
+      })
       return
     }
 

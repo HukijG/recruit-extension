@@ -152,13 +152,21 @@ function CallIcon() {
   )
 }
 
+type CallState =
+  | { kind: "idle" }
+  | { kind: "calling" }
+  | { kind: "ringing" }
+  | { kind: "error"; message: string }
+  | { kind: "rate_limited"; resumeAt: number; message: string }
+
 function CallButton({ phoneNumber }: { phoneNumber: string | null }) {
   const callConfig = useContext(CallConfigContext)
   const [extensionSecret] = useStorage<string>(
     { key: "extensionSecret", instance: localStore },
     ""
   )
-  const [callState, setCallState] = useState<"idle" | "calling" | "ringing" | "error">("idle")
+  const [callState, setCallState] = useState<CallState>({ kind: "idle" })
+  const [, setTick] = useState(0)
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -166,6 +174,21 @@ function CallButton({ phoneNumber }: { phoneNumber: string | null }) {
       if (resetTimerRef.current) clearTimeout(resetTimerRef.current)
     }
   }, [])
+
+  // Drives the rate-limited countdown. Re-renders ~every 250ms while in the
+  // rate_limited phase so the visible "Try again in Xs" label decrements.
+  // Auto-flips back to idle when the wait window elapses.
+  useEffect(() => {
+    if (callState.kind !== "rate_limited") return
+    const id = setInterval(() => {
+      if (Date.now() >= callState.resumeAt) {
+        setCallState({ kind: "idle" })
+      } else {
+        setTick((t) => t + 1)
+      }
+    }, 250)
+    return () => clearInterval(id)
+  }, [callState])
 
   if (!phoneNumber) {
     return (
@@ -178,14 +201,19 @@ function CallButton({ phoneNumber }: { phoneNumber: string | null }) {
 
   const scheduleReset = (ms: number) => {
     if (resetTimerRef.current) clearTimeout(resetTimerRef.current)
-    resetTimerRef.current = setTimeout(() => setCallState("idle"), ms)
+    resetTimerRef.current = setTimeout(() => setCallState({ kind: "idle" }), ms)
   }
 
   const handleClick = async () => {
-    if (callState === "calling") return
-    setCallState("calling")
+    if (callState.kind === "calling" || callState.kind === "rate_limited") return
+    setCallState({ kind: "calling" })
 
-    type CallResp = { ok: boolean; error?: string }
+    type CallResp = {
+      ok: boolean
+      error?: string
+      reason?: "duplicate" | "rate_limit"
+      retryAfterSec?: number
+    }
     const resp = await sendToBackground<unknown, CallResp>({
       name: "initiateDialpadCall",
       body: {
@@ -201,31 +229,63 @@ function CallButton({ phoneNumber }: { phoneNumber: string | null }) {
     )
 
     if (resp?.ok) {
-      setCallState("ringing")
+      setCallState({ kind: "ringing" })
       scheduleReset(2500)
       return
     }
 
+    // Middleware enforces both a back-to-back dedup window (reason: "duplicate",
+    // 1-3s) and a 5/min rolling rate limit (reason: "rate_limit", 1-60s). Both
+    // surface as 429 with retryAfterSec; show the wait as a button-label
+    // countdown so the user gets explicit feedback rather than a silent retry.
+    if (resp?.reason === "duplicate" || resp?.reason === "rate_limit") {
+      const sec = Math.max(1, resp.retryAfterSec ?? 30)
+      setCallState({
+        kind: "rate_limited",
+        resumeAt: Date.now() + sec * 1000,
+        message: resp.error ?? "Try again shortly"
+      })
+      return
+    }
+
     console.warn("[CallButton] initiateDialpadCall failed:", resp?.error)
-    setCallState("error")
+    setCallState({ kind: "error", message: resp?.error ?? "Failed" })
     scheduleReset(4000)
   }
 
-  const label =
-    callState === "calling"
-      ? "Calling…"
-      : callState === "ringing"
-        ? "Ringing"
-        : callState === "error"
-          ? "Failed — retry"
-          : "Call"
+  let label: string
+  let titleAttr: string | undefined
+  switch (callState.kind) {
+    case "calling":
+      label = "Calling…"
+      break
+    case "ringing":
+      label = "Ringing"
+      break
+    case "error":
+      label = "Failed — retry"
+      titleAttr = callState.message
+      break
+    case "rate_limited": {
+      const remaining = Math.max(
+        0,
+        Math.ceil((callState.resumeAt - Date.now()) / 1000)
+      )
+      label = `Try again in ${remaining}s`
+      titleAttr = callState.message
+      break
+    }
+    default:
+      label = "Call"
+  }
 
   return (
     <button
       type="button"
       onClick={handleClick}
-      disabled={callState === "calling"}
+      disabled={callState.kind === "calling" || callState.kind === "rate_limited"}
       className="lr-call-btn"
+      title={titleAttr}
       aria-label={`Call ${phoneNumber}`}>
       <CallIcon />
       {label}

@@ -44,12 +44,32 @@ const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
     })
 
     if (!resp.ok) {
-      let errorBody = ""
+      // Middleware error envelope: { ok: false, error, reason?, retryAfterSec? }.
+      // Forward reason/retryAfterSec verbatim so the CallButton can render a
+      // countdown for 429s (duplicate / rate_limit). For non-JSON responses
+      // (network / proxy quirks), synthesize a fallback from the status line.
+      let body: any = null
       try {
-        errorBody = await resp.text()
+        body = await resp.json()
       } catch {}
-      const msg = `${resp.status} ${resp.statusText}${errorBody ? ": " + errorBody : ""}`
-      res.send({ ok: false, error: msg })
+      if (body && typeof body === "object" && typeof body.error === "string") {
+        res.send({
+          ok: false,
+          error: body.error,
+          reason: body.reason,
+          retryAfterSec:
+            typeof body.retryAfterSec === "number"
+              ? body.retryAfterSec
+              : undefined,
+          status: resp.status
+        })
+        return
+      }
+      res.send({
+        ok: false,
+        error: `${resp.status} ${resp.statusText}`,
+        status: resp.status
+      })
       return
     }
 

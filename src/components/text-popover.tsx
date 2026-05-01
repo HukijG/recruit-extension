@@ -422,6 +422,8 @@ export function TextPopover({
   const [selectedTemplateId, setSelectedTemplateId] = useState("")
   const [sendState, setSendState] = useState<"idle" | "sending">("idle")
   const [sendError, setSendError] = useState<string | null>(null)
+  const [retryAt, setRetryAt] = useState<number | null>(null)
+  const [, setTick] = useState(0)
   const [stored] = useStorage<SmsTemplate[]>(
     { key: TEMPLATES_STORAGE_KEY, instance: localStore },
     []
@@ -465,12 +467,34 @@ export function TextPopover({
     }
   }, [templates, selectedTemplateId])
 
+  // /dialpad-sms doesn't emit 429s today, but the middleware envelope leaves
+  // room for one once production candidate-mode is sending real volume. When
+  // it shows up, decrement the visible "retry in Xs" counter and auto-clear
+  // the lock when the wait expires — same shape as the call button's
+  // rate-limit handling.
+  useEffect(() => {
+    if (retryAt === null) return
+    const id = setInterval(() => {
+      if (Date.now() >= retryAt) {
+        setRetryAt(null)
+      } else {
+        setTick((t) => t + 1)
+      }
+    }, 250)
+    return () => clearInterval(id)
+  }, [retryAt])
+
   const handleYes = async () => {
-    if (sendState === "sending") return
+    if (sendState === "sending" || retryAt !== null) return
     setSendState("sending")
     setSendError(null)
 
-    type SmsResp = { ok: boolean; error?: string }
+    type SmsResp = {
+      ok: boolean
+      error?: string
+      reason?: "duplicate" | "rate_limit"
+      retryAfterSec?: number
+    }
     const resp = await sendToBackground<unknown, SmsResp>({
       name: "sendDialpadSms",
       body: {
@@ -493,8 +517,19 @@ export function TextPopover({
 
     console.warn("[TextPopover] sendDialpadSms failed:", resp?.error)
     setSendState("idle")
+
+    if (resp?.reason === "duplicate" || resp?.reason === "rate_limit") {
+      const sec = Math.max(1, resp.retryAfterSec ?? 30)
+      setRetryAt(Date.now() + sec * 1000)
+      setSendError(resp.error ?? "Try again shortly")
+      return
+    }
+
     setSendError(resp?.error ?? "Couldn't send — try again")
   }
+
+  const retryRemaining =
+    retryAt !== null ? Math.max(0, Math.ceil((retryAt - Date.now()) / 1000)) : 0
 
   // No backdrop click handler — the only close path is the X button, per
   // spec. Stop propagation isn't needed since we don't listen.
@@ -551,7 +586,11 @@ export function TextPopover({
             <div style={popoverStyles.confirmBlock}>
               <p style={popoverStyles.confirmPrompt}>Are you sure?</p>
               {sendError && (
-                <p style={popoverStyles.errorPrompt}>{sendError}</p>
+                <p style={popoverStyles.errorPrompt}>
+                  {retryAt !== null
+                    ? `${sendError} (retry in ${retryRemaining}s)`
+                    : sendError}
+                </p>
               )}
               <div style={popoverStyles.confirmButtons}>
                 <button
@@ -564,9 +603,13 @@ export function TextPopover({
                 <button
                   type="button"
                   onClick={handleYes}
-                  disabled={sendState === "sending"}
+                  disabled={sendState === "sending" || retryAt !== null}
                   className="lr-text-confirm-yes">
-                  {sendState === "sending" ? "Sending…" : "Yes"}
+                  {sendState === "sending"
+                    ? "Sending…"
+                    : retryAt !== null
+                      ? `Wait ${retryRemaining}s`
+                      : "Yes"}
                 </button>
               </div>
             </div>
