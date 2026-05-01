@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 
+import { TemplateManager } from "~components/template-manager"
+
 // --- Text Popover ---
 //
 // Owns the SMS composer UI: action-row trigger button, dimmed-backdrop
@@ -113,6 +115,30 @@ if (
       box-shadow: 0 2px 6px rgba(210,58,44,0.32);
     }
     .lr-text-close-btn:active {
+      transform: translateY(1px);
+    }
+
+    .lr-text-edit-btn {
+      width: 30px;
+      height: 30px;
+      flex-shrink: 0;
+      background-color: transparent;
+      color: #0a66c2;
+      border: 1px solid #0a66c2;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      padding: 0;
+      transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+    }
+    .lr-text-edit-btn:hover {
+      background-color: #0a66c2;
+      color: #ffffff;
+      box-shadow: 0 2px 6px rgba(10,102,194,0.32);
+    }
+    .lr-text-edit-btn:active {
       transform: translateY(1px);
     }
 
@@ -276,6 +302,24 @@ function CloseIcon() {
   )
 }
 
+function PencilIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+    </svg>
+  )
+}
+
 export function TextButton({
   phoneNumber,
   onClick
@@ -320,6 +364,7 @@ export function TextPopover({
 }) {
   const [text, setText] = useState("")
   const [confirming, setConfirming] = useState(false)
+  const [managerOpen, setManagerOpen] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Autofocus on mount so the user can start typing without an extra click.
@@ -371,6 +416,16 @@ export function TextPopover({
             <CloseIcon />
           </button>
         </header>
+        <div style={popoverStyles.pickerRow}>
+          <div style={{ flex: 1 }}>{/* picker placeholder — Phase 5 */}</div>
+          <button
+            type="button"
+            onClick={() => setManagerOpen(true)}
+            className="lr-text-edit-btn"
+            aria-label="Open template manager">
+            <PencilIcon />
+          </button>
+        </div>
         <textarea
           ref={textareaRef}
           className="lr-text-input"
@@ -409,6 +464,9 @@ export function TextPopover({
           )}
         </div>
       </div>
+      {managerOpen && (
+        <TemplateManager onClose={() => setManagerOpen(false)} />
+      )}
     </div>
   )
 }
@@ -454,5 +512,11 @@ const popoverStyles: Record<string, React.CSSProperties> = {
     flexDirection: "row",
     alignItems: "stretch",
     gap: "10px"
+  },
+  pickerRow: {
+    display: "flex",
+    alignItems: "flex-end",
+    gap: "10px",
+    marginBottom: "12px"
   }
 }
