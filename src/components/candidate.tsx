@@ -2,9 +2,14 @@ import { sendToBackground } from "@plasmohq/messaging"
 import { useStorage } from "@plasmohq/storage/hook"
 import { useContext, useEffect, useMemo, useRef, useState } from "react"
 
+import { TextButton } from "~components/text-popover"
 import { styles as syncStyles } from "~components/sync"
 import { COLD_CALL_TYPE, localStore } from "~lib/constants"
-import { CallConfigContext, CallerIdPickerContext } from "~lib/contexts"
+import {
+  CallConfigContext,
+  CallerIdPickerContext,
+  TextSlotContext
+} from "~lib/contexts"
 import {
   formatActivityDate,
   formatCallerOption,
@@ -39,6 +44,7 @@ export function CandidateView({
   onRetryMarkInvalid: () => void
 }) {
   const pickerSlot = useContext(CallerIdPickerContext)
+  const textSlot = useContext(TextSlotContext)
 
   if (state.phase === "idle" || state.phase === "loading") {
     return (
@@ -79,17 +85,39 @@ export function CandidateView({
             <InlineCallerIdPicker {...pickerSlot} />
           </div>
         )}
-        <div style={candidateStyles.actionRow}>
-          <CallButton phoneNumber={state.details.phoneNumber} />
-          <NumberInvalidButton
-            rfId={state.details.rfId}
-            phoneNumber={state.details.phoneNumber}
-            state={state.markInvalid}
-            onArm={onArmMarkInvalid}
-            onUndo={onUndoMarkInvalid}
-            onRetry={onRetryMarkInvalid}
-          />
-        </div>
+        {textSlot ? (
+          <>
+            <div style={candidateStyles.actionRow}>
+              <CallButton phoneNumber={state.details.phoneNumber} />
+              <TextButton
+                phoneNumber={state.details.phoneNumber}
+                onClick={textSlot.onOpen}
+              />
+            </div>
+            <div style={candidateStyles.actionRow}>
+              <NumberInvalidButton
+                rfId={state.details.rfId}
+                phoneNumber={state.details.phoneNumber}
+                state={state.markInvalid}
+                onArm={onArmMarkInvalid}
+                onUndo={onUndoMarkInvalid}
+                onRetry={onRetryMarkInvalid}
+              />
+            </div>
+          </>
+        ) : (
+          <div style={candidateStyles.actionRow}>
+            <CallButton phoneNumber={state.details.phoneNumber} />
+            <NumberInvalidButton
+              rfId={state.details.rfId}
+              phoneNumber={state.details.phoneNumber}
+              state={state.markInvalid}
+              onArm={onArmMarkInvalid}
+              onUndo={onUndoMarkInvalid}
+              onRetry={onRetryMarkInvalid}
+            />
+          </div>
+        )}
       </header>
       <CandidateColdCallList activities={state.details.activities} />
     </div>
@@ -452,7 +480,7 @@ export function InlineCallerIdPicker({
           style={candidateStyles.pickerInlineSelect}>
           {state.data.callerIds.map((c) => (
             <option key={c.aliasId} value={c.aliasId}>
-              {formatCallerOption(c)}
+              {formatCallerOption(c, state.data.callerIds)}
             </option>
           ))}
         </select>
@@ -604,7 +632,7 @@ const candidateStyles: Record<string, React.CSSProperties> = {
   jobCompany: {
     margin: 0,
     fontSize: "16px",
-    color: "#1d1f20"
+    color: "#2e3133"
   },
   jobStageChip: {
     alignSelf: "center",

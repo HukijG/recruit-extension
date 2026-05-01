@@ -99,21 +99,23 @@ export function stageChipStyle(
 }
 
 // --- Caller ID display ---
+//
+// Plain text — Chrome on Windows doesn't render regional-indicator flag
+// emoji and falls back to showing the country code letters, which looked
+// like a stray lowercase prefix. We also drop the per-line label (e.g.
+// "Office main line") in favour of a single clear "<Country> Number".
+// When two caller IDs share a country, a 1-based index is appended so they
+// stay distinguishable ("UK Number 1", "UK Number 2").
 
-export function countryFlag(country: DialpadCallerIdOption["country"]): string {
-  switch (country) {
-    case "UK":
-      return "🇬🇧"
-    case "US":
-      return "🇺🇸"
-    default:
-      return "🌐"
-  }
-}
-
-export function formatCallerOption(c: DialpadCallerIdOption): string {
-  const flag = countryFlag(c.country)
-  const label = c.label || `${c.country} number`
-  const suffix = c.isDefault ? "  (default)" : ""
-  return `${flag}  ${label}${suffix}`
+export function formatCallerOption(
+  c: DialpadCallerIdOption,
+  all: DialpadCallerIdOption[]
+): string {
+  const country =
+    c.country === "UK" ? "UK" : c.country === "US" ? "US" : "International"
+  const sameCountry = all.filter((o) => o.country === c.country)
+  const indexSuffix =
+    sameCountry.length > 1 ? ` ${sameCountry.indexOf(c) + 1}` : ""
+  const defaultSuffix = c.isDefault ? " (default)" : ""
+  return `${country} Number${indexSuffix}${defaultSuffix}`
 }

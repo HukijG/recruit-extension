@@ -1,9 +1,13 @@
 import { sendToBackground } from "@plasmohq/messaging"
 import { useStorage } from "@plasmohq/storage/hook"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import { COLD_CALL_TYPE, localStore } from "~lib/constants"
-import { CallConfigContext, CallerIdPickerContext } from "~lib/contexts"
+import {
+  CallConfigContext,
+  CallerIdPickerContext,
+  TextSlotContext
+} from "~lib/contexts"
 import type { DialpadUserContext } from "~lib/dialpad"
 import type {
   CallConfig,
@@ -13,6 +17,7 @@ import type {
 } from "~lib/types"
 
 import { CandidateView } from "./candidate"
+import { TextPopover } from "./text-popover"
 
 // --- Test Call View ---
 //
@@ -56,6 +61,13 @@ export function TestCallView({ onExit }: { onExit: () => void }) {
   )
   const [contextState, setContextState] = useState<UserContextState>({ status: "loading" })
   const [selectedCallerAliasId, setSelectedCallerAliasId] = useState<string>("")
+  const [textPopoverOpen, setTextPopoverOpen] = useState(false)
+
+  // Stable slot reference so child renders don't churn on unrelated re-renders.
+  const textSlot = useMemo(
+    () => ({ onOpen: () => setTextPopoverOpen(true) }),
+    []
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -136,15 +148,25 @@ export function TestCallView({ onExit }: { onExit: () => void }) {
             selectedAliasId: selectedCallerAliasId,
             onSelect: setSelectedCallerAliasId
           }}>
-          <CandidateView
-            state={candidateState}
-            onRetry={noop}
-            onArmMarkInvalid={noop}
-            onUndoMarkInvalid={noop}
-            onRetryMarkInvalid={noop}
-          />
+          <TextSlotContext.Provider value={textSlot}>
+            <CandidateView
+              state={candidateState}
+              onRetry={noop}
+              onArmMarkInvalid={noop}
+              onUndoMarkInvalid={noop}
+              onRetryMarkInvalid={noop}
+            />
+          </TextSlotContext.Provider>
         </CallerIdPickerContext.Provider>
       </CallConfigContext.Provider>
+      {textPopoverOpen && (
+        <TextPopover
+          fullName={TEST_CANDIDATE_DETAILS.fullName}
+          phoneNumber={TEST_CANDIDATE_DETAILS.phoneNumber}
+          callerAliasId={selectedCallerAliasId || undefined}
+          onClose={() => setTextPopoverOpen(false)}
+        />
+      )}
     </div>
   )
 }

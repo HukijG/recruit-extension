@@ -178,6 +178,14 @@ export type CallerIdPickerSlot = {
   onSelect: (aliasId: string) => void
 } | null
 
+// Optional "open the text composer" slot — only injected by views that want
+// the candidate-mode UI to expose a Text action button (currently test_call).
+// Production candidate mode reads `null` and renders only Call + Number
+// Invalid.
+export type TextSlot = {
+  onOpen: () => void
+} | null
+
 // --- Outcome / cold call ---
 
 export type OutcomeTone = "positive" | "neutral" | "negative"
