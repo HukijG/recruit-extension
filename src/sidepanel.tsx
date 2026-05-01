@@ -2,7 +2,20 @@ import { sendToBackground } from "@plasmohq/messaging"
 import { Storage } from "@plasmohq/storage"
 import { useStorage } from "@plasmohq/storage/hook"
 import Papa from "papaparse"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react"
+
+import type {
+  DialpadCallerIdOption,
+  DialpadUserContext
+} from "~lib/dialpad"
 
 const localStore = new Storage({ area: "local" })
 
@@ -162,6 +175,19 @@ type CandidateState =
   | { phase: "loading"; urlId: string }
   | { phase: "ready"; urlId: string; details: CandidateDetails; markInvalid: MarkInvalidState }
   | { phase: "error"; urlId: string; message: string }
+
+// Per-call caller-ID alias the user picked from the dropdown. The middleware
+// decodes it back to an E.164 number when initiating the call. Production
+// candidate-mode renders without a Provider, so CallButton reads `{}` and
+// the middleware falls back to the user's Dialpad default caller ID.
+//
+// There's no device picker — Dialpad's `initiate_call` endpoint doesn't
+// accept a device_id; it just rings every eligible device and the user
+// picks up wherever they are.
+interface CallConfig {
+  callerAliasId?: string
+}
+const CallConfigContext = createContext<CallConfig>({})
 
 // --- Normalization ---
 
@@ -733,7 +759,7 @@ function SidePanel() {
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null)
   const [jobAddResult, setJobAddResult] = useState<string>("")
   const [showJobModal, setShowJobModal] = useState(false)
-  const [mode, setMode] = useState<"sync" | "candidate">("sync")
+  const [mode, setMode] = useState<"sync" | "candidate" | "test_call">("sync")
   const [candidateUrlId, setCandidateUrlId] = useState<string | null>(null)
   const [candidateState, setCandidateState] = useState<CandidateState>({ phase: "idle" })
   const requestTokenRef = useRef(0)
@@ -831,14 +857,15 @@ function SidePanel() {
   }, [])
 
   useEffect(() => {
-    if (mode === "candidate") {
-      // Candidate mode owns the sidepanel; pipeline polling is irrelevant
-      // and would contribute to LinkedIn-tab load. Clear any active interval.
+    if (mode !== "sync") {
+      // Candidate / test-call modes own the sidepanel; pipeline polling is
+      // irrelevant and would contribute to LinkedIn-tab load. Clear any
+      // active interval.
       if (pollRef.current) {
         clearInterval(pollRef.current)
         pollRef.current = null
       }
-      // Wipe sync transient state — candidate mode wins absolutely (per spec).
+      // Wipe sync transient state — non-sync modes win absolutely.
       resetTransientState()
       setPageInfo(null)
       setWorkflowState("not_on_pipeline")
@@ -878,10 +905,12 @@ function SidePanel() {
       })
       .catch(() => { })
 
-    // Subscribe to background broadcasts.
+    // Subscribe to background broadcasts. Test-call mode is user-triggered
+    // and must NOT be clobbered by URL-driven mode broadcasts — the user has
+    // to hit the Back button to leave it.
     const listener = (message: any) => {
       if (message?.type === "lr-mode-changed") {
-        setMode(message.mode)
+        setMode((prev) => (prev === "test_call" ? prev : message.mode))
         setCandidateUrlId(message.urlId)
       }
     }
@@ -1220,6 +1249,10 @@ function SidePanel() {
         </>
       )}
 
+      {mode === "test_call" && (
+        <TestCallView onExit={() => setMode("sync")} />
+      )}
+
       {mode === "sync" && (
         <>
           {showResetButton && (
@@ -1235,6 +1268,17 @@ function SidePanel() {
             loadStatus={loadStatus}
             count={candidates.length}
           />
+
+          {process.env.NODE_ENV === "development" &&
+            workflowState === "not_on_pipeline" && (
+              <button
+                type="button"
+                onClick={() => setMode("test_call")}
+                style={styles.devTestCallButton}
+                title="Dev only — opens a mock candidate view to exercise the Dialpad API">
+                🧪 Open test call view
+              </button>
+            )}
 
           {workflowState === "profiles_selected" && (
             <button onClick={handleSync} style={styles.syncButton}>
@@ -1454,6 +1498,20 @@ function CallIcon() {
 }
 
 function CallButton({ phoneNumber }: { phoneNumber: string | null }) {
+  const callConfig = useContext(CallConfigContext)
+  const [extensionSecret] = useStorage<string>(
+    { key: "extensionSecret", instance: localStore },
+    ""
+  )
+  const [callState, setCallState] = useState<"idle" | "calling" | "ringing" | "error">("idle")
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current) clearTimeout(resetTimerRef.current)
+    }
+  }, [])
+
   if (!phoneNumber) {
     return (
       <button type="button" disabled className="lr-call-btn" aria-label="Call (no phone on file)">
@@ -1462,51 +1520,366 @@ function CallButton({ phoneNumber }: { phoneNumber: string | null }) {
       </button>
     )
   }
-  const dialUrl = `dialpad://${phoneNumber}?launchMinimode=1`
-  const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
-    e.preventDefault()
-    launchProtocol(dialUrl)
+
+  const scheduleReset = (ms: number) => {
+    if (resetTimerRef.current) clearTimeout(resetTimerRef.current)
+    resetTimerRef.current = setTimeout(() => setCallState("idle"), ms)
   }
+
+  const handleClick = async () => {
+    if (callState === "calling") return
+    setCallState("calling")
+
+    type CallResp = { ok: boolean; error?: string }
+    const resp = await sendToBackground<unknown, CallResp>({
+      name: "initiateDialpadCall",
+      body: {
+        phoneNumber,
+        callerAliasId: callConfig.callerAliasId,
+        secret: extensionSecret
+      }
+    }).catch(
+      (err): CallResp => ({
+        ok: false,
+        error: err?.message ?? "Network error"
+      })
+    )
+
+    if (resp?.ok) {
+      setCallState("ringing")
+      scheduleReset(2500)
+      return
+    }
+
+    console.warn("[CallButton] initiateDialpadCall failed:", resp?.error)
+    setCallState("error")
+    scheduleReset(4000)
+  }
+
+  const label =
+    callState === "calling"
+      ? "Calling…"
+      : callState === "ringing"
+        ? "Ringing"
+        : callState === "error"
+          ? "Failed — retry"
+          : "Call"
+
   return (
-    <a
-      href={dialUrl}
-      className="lr-call-btn"
+    <button
+      type="button"
       onClick={handleClick}
+      disabled={callState === "calling"}
+      className="lr-call-btn"
       aria-label={`Call ${phoneNumber}`}>
       <CallIcon />
-      Call
-    </a>
+      {label}
+    </button>
   )
 }
 
-// Top-level navigation to a custom-scheme URL (dialpad://, tel://, etc.) is
-// silently dropped inside a Chrome sidepanel — and a hidden iframe inherits
-// the same restriction, so the OS handler never sees the URL and the desktop
-// app doesn't get a chance to prompt for permission. Routing the URL through
-// a transient background tab gives Chrome's full tab navigator a shot at it,
-// which surfaces the standard "Open Dialpad?" prompt the first time and
-// launches the app on subsequent clicks once the user picks "Always allow".
-// We close the (now-blank) tab a beat later so the only artefact the user
-// sees is a momentary flash in the tab bar.
-function launchProtocol(url: string) {
-  if (typeof chrome !== "undefined" && chrome.tabs?.create) {
-    chrome.tabs.create({ url, active: false }).then(
-      (tab) => {
-        if (tab?.id != null) {
-          const tabId = tab.id
-          window.setTimeout(() => {
-            chrome.tabs.remove(tabId).catch(() => {})
-          }, 1500)
+// --- Test Call View ---
+//
+// Dev-only mockup of the candidate-mode UI: same layout, hardcoded mock data,
+// phone number wired to the developer's personal mobile so the Dialpad API
+// can be exercised end-to-end without dialing real candidates.
+
+const TEST_CANDIDATE_DETAILS: CandidateDetails = {
+  rfId: -1,
+  fullName: "Test Candidate",
+  phoneNumber: "+447700900123",
+  job: {
+    title: "Senior Software Engineer",
+    company: "Acme Test Co.",
+    stage: "Replied"
+  },
+  activities: [
+    {
+      id: "test-cc-1",
+      type: COLD_CALL_TYPE,
+      name: "Cold call 1",
+      description: "Test note: candidate sounded interested.\nFollow up next week.",
+      createdAt: "2026-04-26T14:23:00Z",
+      outcome: "voicemail"
+    },
+    {
+      id: "test-cc-2",
+      type: COLD_CALL_TYPE,
+      name: "Cold call 2",
+      description: "",
+      createdAt: "2026-04-29T09:15:00Z",
+      outcome: "connected"
+    }
+  ]
+}
+
+type UserContextState =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready"; data: DialpadUserContext }
+
+function TestCallView({ onExit }: { onExit: () => void }) {
+  const [extensionSecret] = useStorage<string>(
+    { key: "extensionSecret", instance: localStore },
+    ""
+  )
+  const [contextState, setContextState] = useState<UserContextState>({ status: "loading" })
+  const [selectedCallerAliasId, setSelectedCallerAliasId] = useState<string>("")
+
+  useEffect(() => {
+    let cancelled = false
+
+    type CtxResp = {
+      ok: boolean
+      data?: DialpadUserContext
+      error?: string
+    }
+
+    sendToBackground<unknown, CtxResp>({
+      name: "getDialpadUserContext",
+      body: { secret: extensionSecret }
+    })
+      .then((resp) => {
+        if (cancelled) return
+        if (resp?.ok && resp.data) {
+          setContextState({ status: "ready", data: resp.data })
+          const defaultCaller =
+            resp.data.callerIds.find((c) => c.isDefault) ?? resp.data.callerIds[0]
+          if (defaultCaller) setSelectedCallerAliasId(defaultCaller.aliasId)
+        } else {
+          setContextState({
+            status: "error",
+            message: resp?.error ?? "Failed to load Dialpad context"
+          })
         }
-      },
-      (err) => {
-        console.warn("[CallButton] chrome.tabs.create failed:", err)
-        window.open(url, "_blank")
-      }
-    )
-    return
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setContextState({
+          status: "error",
+          message: err?.message ?? "Failed to load Dialpad context"
+        })
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [extensionSecret])
+
+  const candidateState: CandidateState = {
+    phase: "ready",
+    urlId: "test-mock",
+    details: TEST_CANDIDATE_DETAILS,
+    markInvalid: { status: "idle" }
   }
-  window.open(url, "_blank")
+  const noop = () => {}
+
+  const callConfig: CallConfig = {
+    callerAliasId: selectedCallerAliasId || undefined
+  }
+
+  return (
+    <div style={testCallStyles.wrapper}>
+      <div style={testCallStyles.banner}>
+        <button
+          type="button"
+          onClick={onExit}
+          style={testCallStyles.backButton}
+          aria-label="Back to landing">
+          ← Back
+        </button>
+        <span style={testCallStyles.bannerLabel}>TEST CALL MODE</span>
+        <span style={testCallStyles.bannerSpacer} />
+      </div>
+      <p style={testCallStyles.bannerHint}>
+        Mock candidate. Call dials{" "}
+        <strong>{TEST_CANDIDATE_DETAILS.phoneNumber}</strong> via the
+        middleware's <code>/dialpad-call</code> endpoint. Dialpad rings every
+        eligible device on your account — pick up wherever's nearest.
+      </p>
+
+      <CallerIdPicker
+        state={contextState}
+        selectedAliasId={selectedCallerAliasId}
+        onSelect={setSelectedCallerAliasId}
+      />
+
+      <CallConfigContext.Provider value={callConfig}>
+        <CandidateView
+          state={candidateState}
+          onRetry={noop}
+          onArmMarkInvalid={noop}
+          onUndoMarkInvalid={noop}
+          onRetryMarkInvalid={noop}
+        />
+      </CallConfigContext.Provider>
+    </div>
+  )
+}
+
+function CallerIdPicker({
+  state,
+  selectedAliasId,
+  onSelect
+}: {
+  state: UserContextState
+  selectedAliasId: string
+  onSelect: (aliasId: string) => void
+}) {
+  return (
+    <div style={testCallStyles.pickerBlock}>
+      <label style={testCallStyles.pickerLabel} htmlFor="lr-test-caller">
+        Outbound caller ID
+      </label>
+      {state.status === "loading" && (
+        <div style={testCallStyles.pickerLoading}>Loading caller IDs…</div>
+      )}
+      {state.status === "error" && (
+        <div style={testCallStyles.pickerError}>{state.message}</div>
+      )}
+      {state.status === "ready" && state.data.callerIds.length === 0 && (
+        <div style={testCallStyles.pickerError}>
+          No caller IDs returned from the middleware.
+        </div>
+      )}
+      {state.status === "ready" && state.data.callerIds.length > 0 && (
+        <select
+          id="lr-test-caller"
+          value={selectedAliasId}
+          onChange={(e) => onSelect(e.target.value)}
+          style={testCallStyles.pickerSelect}>
+          {state.data.callerIds.map((c) => (
+            <option key={c.aliasId} value={c.aliasId}>
+              {formatCallerOption(c)}
+            </option>
+          ))}
+        </select>
+      )}
+    </div>
+  )
+}
+
+function countryFlag(country: DialpadCallerIdOption["country"]): string {
+  switch (country) {
+    case "UK":
+      return "🇬🇧"
+    case "US":
+      return "🇺🇸"
+    default:
+      return "🌐"
+  }
+}
+
+function formatCallerOption(c: DialpadCallerIdOption): string {
+  const flag = countryFlag(c.country)
+  const label = c.label || `${c.country} number`
+  const suffix = c.isDefault ? "  (default)" : ""
+  return `${flag}  ${label}${suffix}`
+}
+
+function formatRelativeTime(iso: string | null): string {
+  if (!iso) return "—"
+  const t = new Date(iso).getTime()
+  if (!Number.isFinite(t)) return "—"
+  const ms = Date.now() - t
+  if (ms < 0) return "just now"
+  const min = 60_000
+  const hour = 60 * min
+  const day = 24 * hour
+  if (ms < hour) {
+    const m = Math.max(1, Math.round(ms / min))
+    return `${m}m ago`
+  }
+  if (ms < day) return `${Math.round(ms / hour)}h ago`
+  if (ms < 30 * day) return `${Math.round(ms / day)}d ago`
+  if (ms < 365 * day) return `${Math.round(ms / (30 * day))}mo ago`
+  return `${Math.round(ms / (365 * day))}y ago`
+}
+
+const testCallStyles: Record<string, React.CSSProperties> = {
+  wrapper: {
+    width: "100%",
+    display: "flex",
+    flexDirection: "column",
+    gap: "10px"
+  },
+  banner: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "8px",
+    padding: "8px 10px",
+    backgroundColor: "#fff8e1",
+    border: "1px solid #f1c34c",
+    borderRadius: "10px"
+  },
+  bannerLabel: {
+    fontSize: "11px",
+    fontWeight: 700,
+    letterSpacing: "0.08em",
+    color: "#7a5b00"
+  },
+  bannerSpacer: {
+    width: "56px"
+  },
+  backButton: {
+    width: "56px",
+    padding: "4px 8px",
+    backgroundColor: "transparent",
+    color: "#7a5b00",
+    border: "1px solid #f1c34c",
+    borderRadius: "8px",
+    fontSize: "12px",
+    fontWeight: 600,
+    cursor: "pointer"
+  },
+  bannerHint: {
+    margin: "-2px 2px 4px",
+    fontSize: "12px",
+    color: "#5f6368",
+    lineHeight: 1.45
+  },
+  pickerBlock: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
+    padding: "8px 10px",
+    backgroundColor: "#ffffff",
+    border: "1px solid #e3e6ea",
+    borderRadius: "10px"
+  },
+  pickerLabel: {
+    fontSize: "11px",
+    fontWeight: 700,
+    letterSpacing: "0.06em",
+    color: "#5f6368",
+    textTransform: "uppercase"
+  },
+  pickerSelect: {
+    width: "100%",
+    padding: "6px 8px",
+    fontSize: "13px",
+    color: "#15171a",
+    backgroundColor: "#ffffff",
+    border: "1px solid #d6dbe1",
+    borderRadius: "8px",
+    fontFamily: "inherit"
+  },
+  pickerLoading: {
+    fontSize: "12px",
+    color: "#80868b",
+    fontStyle: "italic",
+    padding: "4px 0"
+  },
+  pickerError: {
+    fontSize: "12px",
+    color: "#b8302a",
+    backgroundColor: "#fdecea",
+    border: "1px solid #f6c2bd",
+    borderRadius: "6px",
+    padding: "6px 8px",
+    lineHeight: 1.4
+  }
 }
 
 function CandidateJobBox({ job }: { job: CandidateJob | null }) {
@@ -2950,6 +3323,18 @@ const styles: Record<string, React.CSSProperties> = {
     width: "100%",
     maxWidth: "280px",
     transition: "background-color 0.15s"
+  },
+  devTestCallButton: {
+    padding: "8px 14px",
+    backgroundColor: "transparent",
+    color: "#7a5b00",
+    border: "1px dashed #f1c34c",
+    borderRadius: "999px",
+    fontSize: "12px",
+    fontWeight: 600,
+    letterSpacing: "0.02em",
+    cursor: "pointer",
+    marginTop: "12px"
   },
   spinner: {
     width: "28px",
