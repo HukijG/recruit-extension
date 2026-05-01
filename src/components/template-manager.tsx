@@ -1,6 +1,7 @@
 import { useStorage } from "@plasmohq/storage/hook"
 import { useState } from "react"
 
+import { TemplateEditor } from "~components/template-editor"
 import { localStore, TEMPLATES_STORAGE_KEY } from "~lib/constants"
 import { deleteTemplate } from "~lib/templates"
 import type { SmsTemplate } from "~lib/types"
@@ -424,29 +425,10 @@ export function TemplateManager({ onClose }: { onClose: () => void }) {
       )}
 
       {editorMode.kind !== "closed" && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 400,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: "rgba(15,23,42,0.32)"
-          }}
-          onClick={() => setEditorMode({ kind: "closed" })}>
-          <div
-            style={{ background: "#fff", padding: 32, borderRadius: 12 }}
-            onClick={(e) => e.stopPropagation()}>
-            Editor placeholder — Phase 4 will replace this.
-            <br />
-            <button
-              type="button"
-              onClick={() => setEditorMode({ kind: "closed" })}>
-              Close
-            </button>
-          </div>
-        </div>
+        <TemplateEditor
+          initial={editorMode.kind === "edit" ? editorMode.template : null}
+          onClose={() => setEditorMode({ kind: "closed" })}
+        />
       )}
     </div>
   )
