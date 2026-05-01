@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react"
 
+import { useStorage } from "@plasmohq/storage/hook"
+
 import { TemplateManager } from "~components/template-manager"
+import { Select } from "~components/select"
+import { localStore, TEMPLATES_STORAGE_KEY } from "~lib/constants"
+import { substituteFirstName } from "~lib/templates"
+import type { SmsTemplate } from "~lib/types"
 
 // --- Text Popover ---
 //
@@ -369,6 +375,14 @@ export function TextPopover({
   const [text, setText] = useState("")
   const [confirming, setConfirming] = useState(false)
   const [managerOpen, setManagerOpen] = useState(false)
+  const [selectedTemplateId, setSelectedTemplateId] = useState("")
+  const [stored] = useStorage<SmsTemplate[]>(
+    { key: TEMPLATES_STORAGE_KEY, instance: localStore },
+    []
+  )
+  const templates = [...(stored ?? [])].sort((a, b) =>
+    b.updatedAt.localeCompare(a.updatedAt)
+  )
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Autofocus on mount so the user can start typing without an extra click.
@@ -385,6 +399,21 @@ export function TextPopover({
   }
 
   const handleNo = () => setConfirming(false)
+
+  const handlePickTemplate = (templateId: string) => {
+    const template = templates.find((t) => t.id === templateId)
+    if (!template) return
+    const firstName = (fullName ?? "").split(" ")[0] ?? ""
+    setText(substituteFirstName(template.body, firstName))
+    setSelectedTemplateId(templateId)
+  }
+
+  useEffect(() => {
+    if (!selectedTemplateId) return
+    if (!templates.some((t) => t.id === selectedTemplateId)) {
+      setSelectedTemplateId("")
+    }
+  }, [templates, selectedTemplateId])
 
   const handleYes = () => {
     // Backend wiring deferred; surface the payload that will eventually go to
@@ -420,15 +449,25 @@ export function TextPopover({
             <CloseIcon />
           </button>
         </header>
-        <div style={popoverStyles.pickerRow}>
-          <div style={{ flex: 1 }}>{/* picker placeholder — Phase 5 */}</div>
-          <button
-            type="button"
-            onClick={() => setManagerOpen(true)}
-            className="lr-text-edit-btn"
-            aria-label="Open template manager">
-            <PencilIcon />
-          </button>
+        <div style={popoverStyles.pickerColumn}>
+          <span style={popoverStyles.pickerLabel}>TEMPLATE</span>
+          <div style={popoverStyles.pickerRow}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <Select<string>
+                value={selectedTemplateId}
+                onChange={handlePickTemplate}
+                placeholder="Choose template…"
+                options={templates.map((t) => ({ value: t.id, label: t.name }))}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setManagerOpen(true)}
+              className="lr-text-edit-btn"
+              aria-label="Open template manager">
+              <PencilIcon />
+            </button>
+          </div>
         </div>
         <textarea
           ref={textareaRef}
@@ -517,10 +556,22 @@ const popoverStyles: Record<string, React.CSSProperties> = {
     alignItems: "stretch",
     gap: "10px"
   },
+  pickerColumn: {
+    display: "flex",
+    flexDirection: "column",
+    margin: "0 0 14px 0"
+  },
+  pickerLabel: {
+    fontSize: "12px",
+    fontWeight: 700,
+    letterSpacing: "0.04em",
+    color: "#3c4043",
+    textTransform: "uppercase",
+    margin: "0 0 6px 0"
+  },
   pickerRow: {
     display: "flex",
-    alignItems: "flex-end",
-    gap: "10px",
-    marginBottom: "12px"
+    alignItems: "center",
+    gap: "10px"
   }
 }
