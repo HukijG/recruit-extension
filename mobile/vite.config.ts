@@ -14,11 +14,12 @@ export default defineConfig({
   server: {
     host: true,
     port: 5174,
-    // Vite 5+ blocks requests whose Host header isn't in the allowlist as
-    // defense against DNS-rebinding attacks. Localhost / *.local / loopback
-    // IPs are auto-allowed; we add Tailscale's magic-DNS suffix so any
-    // device hitting `<machine>.<tailnet>.ts.net` works. Leading dot makes
-    // this match every subdomain. HMR works through the same hostname.
-    allowedHosts: [".ts.net"]
+    // Bypass Vite's DNS-rebinding allowlist entirely. Default-allowed hosts
+    // (localhost, *.local, loopback) don't cover Tailscale magic-DNS or
+    // raw Tailscale IPs, and we want both to work without per-tailnet
+    // hardcoding. The threat model is thin here: dev server only serves
+    // the bundled JS, the actual data lives behind X-Extension-Token on
+    // the worker, and the dev box is on a private tailnet.
+    allowedHosts: true
   }
 })
