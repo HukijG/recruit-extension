@@ -193,7 +193,7 @@ sidepanelStyle.textContent = `
   }
 
   /* Red modifier for the Hangup state — same pill geometry, swapped colour
-     ramp. Applied when the live SSE call-state stream reports active. */
+     ramp. Applied when polling reports the call is in progress. */
   .lr-call-btn--hangup {
     background-color: #d23a2c;
     border-color: #d23a2c;
@@ -607,10 +607,10 @@ function SidePanel() {
     []
   )
 
-  // Live SSE call-state stream — opens once we have a consultantFirstName.
-  // Always-on for the whole sidepanel session so candidate-mode and
-  // test_call-mode share a single connection (the DO fan-out per consultant
-  // means multiple tabs/windows still see the same state).
+  // Polled call-state hook (POST /extension-call-status). Mounted once at
+  // the sidepanel level so candidate-mode and test_call-mode share state.
+  // Polling itself is gated on status — only runs while there's an active
+  // calling/active call to track; idle = no network.
   const callStream = useCallStream()
   const callStreamSlot = useMemo(
     () => ({

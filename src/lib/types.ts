@@ -186,26 +186,29 @@ export type TextSlot = {
   onOpen: () => void
 } | null
 
-// --- Live call-state stream (SSE) ---
+// --- Live call-state polling ---
 
-// Mirrors the four wire states the worker pushes over /extension-call-stream.
-// `idle`/`ended` both render Call; `calling` renders Calling… (disabled);
-// `active` renders the red Hangup button.
-export type CallStreamStatus = "idle" | "calling" | "active" | "ended"
+// Three local UX states. The worker only reports two wire states
+// (`in_progress` / `ended`) over POST /extension-call-status; the hook
+// translates those to transitions across these three. `idle` renders Call;
+// `calling` renders Calling… (disabled); `active` renders the red Hangup.
+export type CallStreamStatus = "idle" | "calling" | "active"
 
 export interface CallStreamState {
   status: CallStreamStatus
-  // Candidate's E.164 number per the worker. Present on calling/active/ended,
-  // null on idle. Useful for cross-tab sanity-checking the active call.
+  // Candidate's E.164 number stamped locally when /dialpad-call fires. The
+  // polling response intentionally doesn't include the dialed number — we
+  // already know it. Used by per-candidate views to phone-match and gate
+  // Calling…/Hangup affordances to the right profile.
   phoneNumber: string | null
 }
 
 // Hook-shaped slot exposed via context so any view can read live state and
 // preempt with a local "calling" intent the moment /dialpad-call fires —
-// before SSE confirms `active`. The candidate's own phone number is required
-// when starting a local call so the per-candidate UI can phone-match against
-// state.phoneNumber and avoid showing Hangup/Calling on a different
-// candidate's profile.
+// before polling confirms `active`. The candidate's own phone number is
+// required when starting a local call so the per-candidate UI can
+// phone-match against state.phoneNumber and avoid showing Hangup/Calling on
+// a different candidate's profile.
 export type CallStreamSlot = {
   state: CallStreamState
   beginLocalCalling: (phoneNumber: string) => void

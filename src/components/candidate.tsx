@@ -271,9 +271,10 @@ function CallButton({ phoneNumber }: { phoneNumber: string | null }) {
     )
 
     if (resp?.ok) {
-      // 200 means the worker queued a watch + forwarded to Dialpad. Flip to
-      // `active` only when SSE delivers `state: active`. The hook's 15s
-      // watchdog reverts silently if Dialpad never confirms.
+      // 200 means the worker accepted the call and is discovering the call_id
+      // via Dialpad's call-list. Polling flips us to `active` on the first
+      // `in_progress` response; the hook's 10s watchdog reverts silently if
+      // discovery never lands.
       return
     }
 
@@ -314,15 +315,15 @@ function CallButton({ phoneNumber }: { phoneNumber: string | null }) {
     setHangupPending(false)
 
     if (resp?.ok) {
-      // SSE will deliver `state: ended` once Dialpad fires its hangup event.
-      // No local optimistic transition — keeps multi-tab UI consistent.
+      // Polling will deliver `ended` on the next tick once Dialpad's hangup
+      // webhook lands (or the call-list reflects termination). No local
+      // optimistic transition — keeps the state machine driven by one source.
       return
     }
 
-    // 409 = "No active call" (Dialpad's calling event hadn't landed yet, or
-    // the call already terminated). All other failures: same silent revert.
-    // SSE will eventually reconcile state; the user can click Hangup again
-    // if the button is still red, or just wait for the state flip.
+    // 409 = "No active call" (the Calling… buffer should prevent this, but
+    // races with very fast hangups can still show it). All other failures:
+    // same silent revert. Polling will reconcile state on the next tick.
     console.warn("[CallButton] dialpadHangup failed:", resp?.error)
   }
 

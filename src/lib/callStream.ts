@@ -4,22 +4,31 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { localStore } from "~lib/constants"
 import type { CallStreamState, CallStreamStatus } from "~lib/types"
 
-// Single long-lived SSE stream against the middleware that pushes per-
-// consultant call-state transitions. Spec:
-// dialpad-call-event-hangup-handling.md (idle | calling | active | ended).
-// EventSource is opened once per sidepanel mount and shared across both
-// candidate-mode and test_call-mode via CallStreamContext, so a multi-tab
-// consultant sees one unified Call/Hangup state.
+// Polling-based call-state hook against POST /extension-call-status.
+// Spec: the middleware polling-update handover.
+//
+// State machine (3 values, internal-only):
+//   idle    → button shows "Call"
+//   calling → button shows "Calling…" (disabled)
+//   active  → button shows "Hangup"  (red, enabled)
+//
+// The worker only reports two wire states (`in_progress`, `ended`); we
+// translate those to transitions over the local 3-value status. Polling only
+// runs while status !== "idle"; on sidepanel reopen we never rehydrate "a
+// call is in progress elsewhere" — by handover, cross-navigation is
+// deliberately not durable.
 
 const MIDDLEWARE_URL = process.env.PLASMO_PUBLIC_MIDDLEWARE_URL
-const ROUTE_PATH = "/extension-call-stream"
+const ROUTE_PATH = "/extension-call-status"
 
-// 15s — if /dialpad-call returns 200 but Dialpad never fires the matching
-// `calling` event, SSE will never push us to `active`. Worker-side the watch
-// KV expires after 90s, but the user needs the button re-enabled much sooner.
-// The revert is silent — by request, we never surface a "Failed — retry"
-// label; the button just goes back to "Call" so the user can try again.
-const CALLING_WATCHDOG_MS = 15_000
+// 500ms cadence — handover's recommended sweet spot. 250ms minimum (no
+// benefit, burns quota); 1s maximum (sluggish hangup detection).
+const POLL_INTERVAL_MS = 500
+
+// 10s clock from beginLocalCalling. If the polling loop never sees
+// `in_progress` within this window, give up and revert to idle. Silent revert
+// by request; we never surface a "Failed — retry" label.
+const CALLING_WATCHDOG_MS = 10_000
 
 export interface UseCallStreamReturn {
   state: CallStreamState
@@ -27,9 +36,15 @@ export interface UseCallStreamReturn {
   cancelLocalCalling: () => void
 }
 
+type WireState = "in_progress" | "ended"
+
 export function useCallStream(): UseCallStreamReturn {
   const [consultantFirstName] = useStorage<string>(
     { key: "consultantFirstName", instance: localStore },
+    ""
+  )
+  const [extensionSecret] = useStorage<string>(
+    { key: "extensionSecret", instance: localStore },
     ""
   )
 
@@ -38,12 +53,18 @@ export function useCallStream(): UseCallStreamReturn {
     phoneNumber: null
   })
 
-  // Latest state held in a ref so the watchdog timeout can read the current
-  // status without restarting itself on every state change.
+  // Latest state in a ref so the polling loop and watchdog can read the
+  // current status without re-arming themselves on every state change.
   const stateRef = useRef(state)
   stateRef.current = state
 
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const inFlightRef = useRef<AbortController | null>(null)
+  // setInterval captures poll at arming time, but poll's identity changes
+  // when consultantFirstName / extensionSecret resolve from useStorage. The
+  // ref lets the interval call the LATEST poll without rearming the timer.
+  const pollRef = useRef<() => Promise<void>>(async () => {})
 
   const clearWatchdog = useCallback(() => {
     if (watchdogRef.current) {
@@ -52,88 +73,166 @@ export function useCallStream(): UseCallStreamReturn {
     }
   }, [])
 
-  const startWatchdog = useCallback(() => {
+  const stopPolling = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current)
+      intervalRef.current = null
+    }
+    if (inFlightRef.current) {
+      inFlightRef.current.abort()
+      inFlightRef.current = null
+    }
+  }, [])
+
+  // Apply a wire response. Caller is the polling loop; transitions follow the
+  // handover's table: in_progress flips calling→active and is a no-op while
+  // active; ended terminates active but is ignored while calling (the 10s
+  // clock owns the give-up decision).
+  const applyWireState = useCallback((wire: WireState) => {
+    const prev = stateRef.current.status
+    if (wire === "in_progress") {
+      if (prev === "calling") {
+        clearWatchdog()
+        setState((s) => ({ status: "active", phoneNumber: s.phoneNumber }))
+      }
+      // active → no-op; idle → polling shouldn't be running, so unreachable.
+      return
+    }
+    // wire === "ended"
+    if (prev === "active") {
+      stopPolling()
+      setState({ status: "idle", phoneNumber: null })
+    }
+    // calling → ignore; idle → unreachable.
+  }, [clearWatchdog, stopPolling])
+
+  // The poll itself. Direct fetch from the hook (matches the prior SSE
+  // pattern; avoids 180-per-call background-messaging round trips).
+  const poll = useCallback(async () => {
+    if (!MIDDLEWARE_URL || !consultantFirstName) return
+    // Coalesce — never run two polls in flight. The interval may fire while
+    // the previous request hasn't returned; in that case skip.
+    if (inFlightRef.current) return
+
+    const controller = new AbortController()
+    inFlightRef.current = controller
+
+    try {
+      const url = `${MIDDLEWARE_URL.replace(/\/+$/, "")}${ROUTE_PATH}`
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json"
+      }
+      if (extensionSecret) headers["X-Extension-Token"] = extensionSecret
+
+      const resp = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ consultantFirstName }),
+        signal: controller.signal
+      })
+
+      // Auth/registry failures are terminal — keep polling won't help. Log and
+      // stop so the user isn't silently spamming 401/403.
+      if (resp.status === 401 || resp.status === 403) {
+        console.warn(
+          `[callStream] poll ${resp.status} — stopping (config issue)`
+        )
+        stopPolling()
+        if (stateRef.current.status !== "idle") {
+          clearWatchdog()
+          setState({ status: "idle", phoneNumber: null })
+        }
+        return
+      }
+
+      // Transient discovery / upstream failures — handover says keep polling;
+      // don't backoff (500ms is already polite). Next interval tick retries.
+      if (resp.status === 500 || resp.status === 502) return
+
+      if (!resp.ok) {
+        console.warn(
+          `[callStream] poll unexpected ${resp.status} — keeping loop alive`
+        )
+        return
+      }
+
+      const body = (await resp.json().catch(() => null)) as {
+        state?: WireState
+      } | null
+      if (body?.state === "in_progress" || body?.state === "ended") {
+        applyWireState(body.state)
+      }
+    } catch (err: any) {
+      // Aborted = unmount/state-cleared; not an error.
+      if (err?.name === "AbortError") return
+      // Network blip — keep loop alive.
+      console.warn("[callStream] poll error:", err?.message ?? err)
+    } finally {
+      if (inFlightRef.current === controller) {
+        inFlightRef.current = null
+      }
+    }
+  }, [applyWireState, clearWatchdog, consultantFirstName, extensionSecret, stopPolling])
+
+  // Keep pollRef pointing at the freshest poll closure so the interval
+  // lambda below always calls the current one, regardless of which deps
+  // changed.
+  useEffect(() => {
+    pollRef.current = poll
+  }, [poll])
+
+  // Drive the polling loop off status. Handover says: only poll while there's
+  // something to poll for (status !== "idle"). When state goes back to idle,
+  // stop. When state transitions out of idle, start.
+  useEffect(() => {
+    if (state.status === "idle") {
+      stopPolling()
+      return
+    }
+    if (intervalRef.current) return // already polling
+    // Kick off an immediate poll so the worst-case wait for in_progress is
+    // bounded by network latency, not POLL_INTERVAL_MS + latency.
+    void pollRef.current()
+    intervalRef.current = setInterval(() => {
+      void pollRef.current()
+    }, POLL_INTERVAL_MS)
+  }, [state.status, stopPolling])
+
+  // Clean up timers + in-flight fetches on unmount. Note: stopPolling itself
+  // is a stable callback, so the cleanup tracks unmount, not status changes.
+  useEffect(() => {
+    return () => {
+      stopPolling()
+      clearWatchdog()
+    }
+  }, [stopPolling, clearWatchdog])
+
+  const beginLocalCalling = useCallback((phoneNumber: string) => {
+    // Stamp the dialed phone so per-candidate views can phone-match
+    // state.phoneNumber against their own number — only the candidate the
+    // call is for shows Calling…/Hangup.
+    setState({ status: "calling", phoneNumber })
+    // 10s clock starts here rather than after /dialpad-call's 200 — the
+    // initiateDialpadCall round-trip is fast (<<1s) so this is functionally
+    // equivalent and keeps the timer logic colocated with the status.
     clearWatchdog()
     watchdogRef.current = setTimeout(() => {
       watchdogRef.current = null
-      // Only revert if we're still in `calling` — SSE may have already moved
-      // us to active/ended/idle in the meantime. Silent revert by design.
+      // Only revert if we're still in `calling` — polling may have already
+      // flipped us to active, or cancelLocalCalling may have flipped us back
+      // to idle on a /dialpad-call rejection. Silent revert by design.
       if (stateRef.current.status === "calling") {
         setState({ status: "idle", phoneNumber: null })
       }
     }, CALLING_WATCHDOG_MS)
   }, [clearWatchdog])
 
-  // Helper: apply a new status, managing the watchdog as a side effect of
-  // entering/leaving the `calling` state.
-  const transitionTo = useCallback(
-    (next: CallStreamState) => {
-      const prevStatus = stateRef.current.status
-      if (prevStatus !== "calling" && next.status === "calling") {
-        startWatchdog()
-      } else if (prevStatus === "calling" && next.status !== "calling") {
-        clearWatchdog()
-      }
-      setState(next)
-    },
-    [startWatchdog, clearWatchdog]
-  )
-
-  // SSE subscription — opens once we have a consultantFirstName and a
-  // configured middleware URL. EventSource auto-reconnects on transport
-  // failures; the DO replays current state on reconnect, so we never poll.
-  useEffect(() => {
-    if (!MIDDLEWARE_URL || !consultantFirstName) return
-
-    const url = new URL(`${MIDDLEWARE_URL.replace(/\/+$/, "")}${ROUTE_PATH}`)
-    url.searchParams.set("consultantFirstName", consultantFirstName)
-
-    const es = new EventSource(url.toString())
-
-    const onState = (event: MessageEvent) => {
-      try {
-        const data = JSON.parse(event.data) as {
-          state: CallStreamStatus
-          phoneNumber?: string | null
-        }
-        transitionTo({
-          status: data.state,
-          phoneNumber: data.phoneNumber ?? null
-        })
-      } catch (err) {
-        console.warn("[callStream] failed to parse state event", err)
-      }
-    }
-
-    es.addEventListener("state", onState)
-    // `hello` fires once on connect — just confirms the stream is live; no
-    // extra handling needed beyond letting EventSource swallow it.
-
-    return () => {
-      es.removeEventListener("state", onState)
-      es.close()
-    }
-  }, [consultantFirstName, transitionTo])
-
-  useEffect(() => () => clearWatchdog(), [clearWatchdog])
-
-  const beginLocalCalling = useCallback(
-    (phoneNumber: string) => {
-      // Stamp the phone we're dialing so per-candidate views can phone-match
-      // against state.phoneNumber and only render Calling…/Hangup when we're
-      // looking at the candidate the call is for.
-      transitionTo({ status: "calling", phoneNumber })
-    },
-    [transitionTo]
-  )
-
   const cancelLocalCalling = useCallback(() => {
+    clearWatchdog()
     if (stateRef.current.status === "calling") {
-      transitionTo({ status: "idle", phoneNumber: null })
-    } else {
-      clearWatchdog()
+      setState({ status: "idle", phoneNumber: null })
     }
-  }, [transitionTo, clearWatchdog])
+  }, [clearWatchdog])
 
   return { state, beginLocalCalling, cancelLocalCalling }
 }
