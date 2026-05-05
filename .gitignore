@@ -4,7 +4,10 @@ build
 
 # Reference/debug files
 export.csv
+# Ignore HTML scraps (extension reference dumps) — but mobile/ is a real
+# Vite app whose index.html is a tracked source file.
 *.html
+!mobile/**/*.html
 rf-candidate-added-information.json
 
 # Environment files (.env.example is committed; the real ones are not)
