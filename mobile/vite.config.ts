@@ -5,6 +5,10 @@ import path from "node:path"
 // `~` alias mirrors the extension's tsconfig path so files can be copied
 // across without rewriting imports.
 export default defineConfig({
+  // Pin the project root to mobile/ explicitly. Without this, Vite's
+  // default root-inference can climb to the extension repo root (the one
+  // with plasmo's tsconfig), miss `index.html`, and 404 every request.
+  root: __dirname,
   plugins: [react()],
   resolve: {
     alias: {
