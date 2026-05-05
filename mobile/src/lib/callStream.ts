@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import { useStorage } from "~/lib/storage"
+import { storage, useStorage } from "~/lib/storage"
 import type { CallStreamState } from "~/lib/types"
 
 // Polling-based call-state hook against POST /extension-call-status.
@@ -17,12 +17,61 @@ import type { CallStreamState } from "~/lib/types"
 // seen `in_progress` in that window (whether the worker errored, returned
 // no-active-call, or stayed silent), silently revert to idle so the user
 // can retry. `in_progress` flips us to `active` and clears the watchdog.
+//
+// State persistence: every non-idle transition writes status + phoneNumber
+// + savedAt to localStorage; on hook mount we hydrate from there. This
+// survives PWA backgrounding (Android suspending the tab), tab switches,
+// and full reloads — so the Hangup button stays live when the user comes
+// back to the app mid-call. A 30-minute freshness TTL discards stale state
+// from previous days; per-candidate phone-match logic in CallButton means
+// the persisted state is only surfaced on the right candidate page.
 
 const MIDDLEWARE_URL = import.meta.env.VITE_MIDDLEWARE_URL
 const ROUTE_PATH = "/extension-call-status"
 
 const POLL_INTERVAL_MS = 500
 const CALLING_WATCHDOG_MS = 10_000
+const PERSIST_KEY = "callStream:state"
+const PERSIST_TTL_MS = 30 * 60 * 1000
+
+interface PersistedCallState {
+  status: "calling" | "active"
+  phoneNumber: string | null
+  savedAt: number
+}
+
+function readPersisted(): PersistedCallState | null {
+  const raw = storage.get<unknown>(PERSIST_KEY, null)
+  if (!raw || typeof raw !== "object") return null
+  const obj = raw as Partial<PersistedCallState>
+  if (
+    (obj.status !== "calling" && obj.status !== "active") ||
+    typeof obj.savedAt !== "number"
+  ) {
+    return null
+  }
+  if (Date.now() - obj.savedAt > PERSIST_TTL_MS) {
+    storage.set(PERSIST_KEY, null)
+    return null
+  }
+  return {
+    status: obj.status,
+    phoneNumber: typeof obj.phoneNumber === "string" ? obj.phoneNumber : null,
+    savedAt: obj.savedAt
+  }
+}
+
+function writePersisted(state: CallStreamState): void {
+  if (state.status === "idle") {
+    storage.set(PERSIST_KEY, null)
+    return
+  }
+  storage.set(PERSIST_KEY, {
+    status: state.status,
+    phoneNumber: state.phoneNumber,
+    savedAt: Date.now()
+  })
+}
 
 export interface UseCallStreamReturn {
   state: CallStreamState
@@ -36,9 +85,12 @@ export function useCallStream(): UseCallStreamReturn {
   const [consultantFirstName] = useStorage<string>("consultantFirstName", "")
   const [extensionSecret] = useStorage<string>("extensionSecret", "")
 
-  const [state, setState] = useState<CallStreamState>({
-    status: "idle",
-    phoneNumber: null
+  const [state, setState] = useState<CallStreamState>(() => {
+    const persisted = readPersisted()
+    if (persisted) {
+      return { status: persisted.status, phoneNumber: persisted.phoneNumber }
+    }
+    return { status: "idle", phoneNumber: null }
   })
 
   const stateRef = useRef(state)
@@ -184,6 +236,28 @@ export function useCallStream(): UseCallStreamReturn {
       clearWatchdog()
     }
   }, [stopPolling, clearWatchdog])
+
+  // Persist state changes to localStorage so a backgrounded / reloaded PWA
+  // can hydrate the call state on next mount. Idle clears the entry.
+  useEffect(() => {
+    writePersisted(state)
+  }, [state])
+
+  // Mount-only: if we hydrated into `calling`, beginLocalCalling didn't run
+  // so its watchdog wasn't armed. Arm a fresh 10s clock now so a stuck
+  // hydrated-calling state can't sit forever waiting for an in_progress
+  // that never lands.
+  useEffect(() => {
+    if (stateRef.current.status === "calling" && !watchdogRef.current) {
+      watchdogRef.current = setTimeout(() => {
+        watchdogRef.current = null
+        if (stateRef.current.status === "calling") {
+          setState({ status: "idle", phoneNumber: null })
+        }
+      }, CALLING_WATCHDOG_MS)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const beginLocalCalling = useCallback(
     (phoneNumber: string) => {

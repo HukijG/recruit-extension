@@ -14,15 +14,21 @@ import type { CallStreamState } from "~lib/types"
 //
 // The worker only reports two wire states (`in_progress`, `ended`); we
 // translate those to transitions over the local 3-value status. Polling only
-// runs while status !== "idle"; on sidepanel reopen we never rehydrate "a
-// call is in progress elsewhere" — by handover, cross-navigation is
-// deliberately not durable.
+// runs while status !== "idle".
 //
 // Polling kicks off the instant status leaves idle (no initial delay), and
 // a 10s wallclock from beginLocalCalling acts as a give-up — if we haven't
 // seen `in_progress` in that window (whether the worker errored, returned
 // no-active-call, or stayed silent), silently revert to idle so the user
 // can retry. `in_progress` flips us to `active` and clears the watchdog.
+//
+// State persistence: every non-idle transition writes status + phoneNumber
+// + savedAt to the side panel's localStorage; on hook mount we hydrate from
+// there. Survives sidepanel close/reopen and tab switches so the Hangup
+// button stays live when the user comes back mid-call. A 30-minute freshness
+// TTL discards stale state from previous days; per-candidate phone-match
+// logic in CallButton means the persisted state is only surfaced on the
+// right candidate page.
 
 const MIDDLEWARE_URL = process.env.PLASMO_PUBLIC_MIDDLEWARE_URL
 const ROUTE_PATH = "/extension-call-status"
@@ -35,6 +41,60 @@ const POLL_INTERVAL_MS = 500
 // `in_progress` by then, silently revert to idle. Silent revert by request;
 // we never surface a "Failed — retry" label.
 const CALLING_WATCHDOG_MS = 10_000
+
+const PERSIST_KEY = "callStream:state"
+const PERSIST_TTL_MS = 30 * 60 * 1000
+
+interface PersistedCallState {
+  status: "calling" | "active"
+  phoneNumber: string | null
+  savedAt: number
+}
+
+function readPersisted(): PersistedCallState | null {
+  if (typeof window === "undefined") return null
+  const raw = window.localStorage.getItem(PERSIST_KEY)
+  if (!raw) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (!parsed || typeof parsed !== "object") return null
+  const obj = parsed as Partial<PersistedCallState>
+  if (
+    (obj.status !== "calling" && obj.status !== "active") ||
+    typeof obj.savedAt !== "number"
+  ) {
+    return null
+  }
+  if (Date.now() - obj.savedAt > PERSIST_TTL_MS) {
+    window.localStorage.removeItem(PERSIST_KEY)
+    return null
+  }
+  return {
+    status: obj.status,
+    phoneNumber: typeof obj.phoneNumber === "string" ? obj.phoneNumber : null,
+    savedAt: obj.savedAt
+  }
+}
+
+function writePersisted(state: CallStreamState): void {
+  if (typeof window === "undefined") return
+  if (state.status === "idle") {
+    window.localStorage.removeItem(PERSIST_KEY)
+    return
+  }
+  window.localStorage.setItem(
+    PERSIST_KEY,
+    JSON.stringify({
+      status: state.status,
+      phoneNumber: state.phoneNumber,
+      savedAt: Date.now()
+    })
+  )
+}
 
 export interface UseCallStreamReturn {
   state: CallStreamState
@@ -54,9 +114,12 @@ export function useCallStream(): UseCallStreamReturn {
     ""
   )
 
-  const [state, setState] = useState<CallStreamState>({
-    status: "idle",
-    phoneNumber: null
+  const [state, setState] = useState<CallStreamState>(() => {
+    const persisted = readPersisted()
+    if (persisted) {
+      return { status: persisted.status, phoneNumber: persisted.phoneNumber }
+    }
+    return { status: "idle", phoneNumber: null }
   })
 
   // Latest state in a ref so the polling loop and watchdog can read the
@@ -213,6 +276,28 @@ export function useCallStream(): UseCallStreamReturn {
       clearWatchdog()
     }
   }, [stopPolling, clearWatchdog])
+
+  // Persist state changes to localStorage so a closed/reopened sidepanel
+  // can hydrate the call state on next mount. Idle clears the entry.
+  useEffect(() => {
+    writePersisted(state)
+  }, [state])
+
+  // Mount-only: if we hydrated into `calling`, beginLocalCalling didn't run
+  // so its watchdog wasn't armed. Arm a fresh 10s clock now so a stuck
+  // hydrated-calling state can't sit forever waiting for an in_progress
+  // that never lands.
+  useEffect(() => {
+    if (stateRef.current.status === "calling" && !watchdogRef.current) {
+      watchdogRef.current = setTimeout(() => {
+        watchdogRef.current = null
+        if (stateRef.current.status === "calling") {
+          setState({ status: "idle", phoneNumber: null })
+        }
+      }, CALLING_WATCHDOG_MS)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const beginLocalCalling = useCallback((phoneNumber: string) => {
     // Stamp the dialed phone so per-candidate views can phone-match
