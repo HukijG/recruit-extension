@@ -9,7 +9,7 @@ import type { CallStreamState } from "~lib/types"
 //
 // State machine (3 values, internal-only):
 //   idle    → button shows "Call"
-//   calling → button shows "Calling…" (disabled, brief)
+//   calling → button shows "Calling…" (disabled)
 //   active  → button shows "Hangup"  (red, enabled)
 //
 // The worker only reports two wire states (`in_progress`, `ended`); we
@@ -19,12 +19,10 @@ import type { CallStreamState } from "~lib/types"
 // deliberately not durable.
 //
 // Polling kicks off the instant status leaves idle (no initial delay), and
-// after 2s of `calling` we optimistically flip to `active` regardless of
-// whether `in_progress` has landed — the worker's call discovery often
-// takes longer than the user is willing to look at a grey button, and a
-// real Hangup affordance is more useful than an honest one. Polling will
-// flip to `active` earlier if `in_progress` arrives sooner. Once in
-// `active`, only an `ended` wire event (or cancelLocalCalling) leaves.
+// a 10s wallclock from beginLocalCalling acts as a give-up — if we haven't
+// seen `in_progress` in that window (whether the worker errored, returned
+// no-active-call, or stayed silent), silently revert to idle so the user
+// can retry. `in_progress` flips us to `active` and clears the watchdog.
 
 const MIDDLEWARE_URL = process.env.PLASMO_PUBLIC_MIDDLEWARE_URL
 const ROUTE_PATH = "/extension-call-status"
@@ -33,10 +31,10 @@ const ROUTE_PATH = "/extension-call-status"
 // benefit, burns quota); 1s maximum (sluggish hangup detection).
 const POLL_INTERVAL_MS = 500
 
-// 2s after beginLocalCalling, optimistically promote calling→active so
-// the user gets a usable Hangup button even before the worker has confirmed
-// the call_id via Dialpad's call-list.
-const OPTIMISTIC_ACTIVE_MS = 2_000
+// 10s wallclock from beginLocalCalling. If polling hasn't seen
+// `in_progress` by then, silently revert to idle. Silent revert by request;
+// we never surface a "Failed — retry" label.
+const CALLING_WATCHDOG_MS = 10_000
 
 export interface UseCallStreamReturn {
   state: CallStreamState
@@ -61,12 +59,12 @@ export function useCallStream(): UseCallStreamReturn {
     phoneNumber: null
   })
 
-  // Latest state in a ref so the polling loop can read the current status
-  // without re-arming itself on every state change.
+  // Latest state in a ref so the polling loop and watchdog can read the
+  // current status without re-arming themselves on every state change.
   const stateRef = useRef(state)
   stateRef.current = state
 
-  const optimisticRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const inFlightRef = useRef<AbortController | null>(null)
   // setInterval captures poll at arming time, but poll's identity changes
@@ -74,10 +72,10 @@ export function useCallStream(): UseCallStreamReturn {
   // ref lets the interval call the LATEST poll without rearming the timer.
   const pollRef = useRef<() => Promise<void>>(async () => {})
 
-  const clearOptimistic = useCallback(() => {
-    if (optimisticRef.current) {
-      clearTimeout(optimisticRef.current)
-      optimisticRef.current = null
+  const clearWatchdog = useCallback(() => {
+    if (watchdogRef.current) {
+      clearTimeout(watchdogRef.current)
+      watchdogRef.current = null
     }
   }, [])
 
@@ -93,14 +91,14 @@ export function useCallStream(): UseCallStreamReturn {
   }, [])
 
   // Apply a wire response. in_progress flips calling→active and clears the
-  // pending optimistic timer (we got the real signal). active+in_progress
-  // is a no-op; ended terminates active but is ignored while calling — the
-  // optimistic timer owns the calling→active transition.
+  // watchdog (we got the signal, no need to give up). active+in_progress is
+  // a no-op; ended terminates active but is ignored while calling — the
+  // watchdog owns the give-up decision in that state.
   const applyWireState = useCallback((wire: WireState) => {
     const prev = stateRef.current.status
     if (wire === "in_progress") {
       if (prev === "calling") {
-        clearOptimistic()
+        clearWatchdog()
         setState((s) => ({ status: "active", phoneNumber: s.phoneNumber }))
       }
       // active → no-op; idle → polling shouldn't be running, so unreachable.
@@ -112,7 +110,7 @@ export function useCallStream(): UseCallStreamReturn {
       setState({ status: "idle", phoneNumber: null })
     }
     // calling → ignore; idle → unreachable.
-  }, [clearOptimistic, stopPolling])
+  }, [clearWatchdog, stopPolling])
 
   // The poll itself. Direct fetch from the hook (matches the prior SSE
   // pattern; avoids 180-per-call background-messaging round trips).
@@ -146,8 +144,8 @@ export function useCallStream(): UseCallStreamReturn {
           `[callStream] poll ${resp.status} — stopping (config issue)`
         )
         stopPolling()
-        clearOptimistic()
         if (stateRef.current.status !== "idle") {
+          clearWatchdog()
           setState({ status: "idle", phoneNumber: null })
         }
         return
@@ -180,7 +178,7 @@ export function useCallStream(): UseCallStreamReturn {
         inFlightRef.current = null
       }
     }
-  }, [applyWireState, clearOptimistic, consultantFirstName, extensionSecret, stopPolling])
+  }, [applyWireState, clearWatchdog, consultantFirstName, extensionSecret, stopPolling])
 
   // Keep pollRef pointing at the freshest poll closure so the interval
   // lambda below always calls the current one, regardless of which deps
@@ -212,9 +210,9 @@ export function useCallStream(): UseCallStreamReturn {
   useEffect(() => {
     return () => {
       stopPolling()
-      clearOptimistic()
+      clearWatchdog()
     }
-  }, [stopPolling, clearOptimistic])
+  }, [stopPolling, clearWatchdog])
 
   const beginLocalCalling = useCallback((phoneNumber: string) => {
     // Stamp the dialed phone so per-candidate views can phone-match
@@ -222,24 +220,24 @@ export function useCallStream(): UseCallStreamReturn {
     // call is for shows Calling…/Hangup. The polling effect picks up the
     // calling status and starts hitting /extension-call-status immediately.
     setState({ status: "calling", phoneNumber })
-    // 2s optimistic flip — promote calling→active even if `in_progress`
-    // hasn't been observed yet. Polling will overtake this if it lands
-    // first; once active, only `ended` or cancel returns to idle.
-    clearOptimistic()
-    optimisticRef.current = setTimeout(() => {
-      optimisticRef.current = null
+    // 10s wallclock. If polling never observes `in_progress` in this
+    // window — whether from worker errors, no-active-call responses, or
+    // just silence — silently revert to idle so the user can retry.
+    clearWatchdog()
+    watchdogRef.current = setTimeout(() => {
+      watchdogRef.current = null
       if (stateRef.current.status === "calling") {
-        setState((s) => ({ status: "active", phoneNumber: s.phoneNumber }))
+        setState({ status: "idle", phoneNumber: null })
       }
-    }, OPTIMISTIC_ACTIVE_MS)
-  }, [clearOptimistic])
+    }, CALLING_WATCHDOG_MS)
+  }, [clearWatchdog])
 
   const cancelLocalCalling = useCallback(() => {
-    clearOptimistic()
+    clearWatchdog()
     if (stateRef.current.status === "calling") {
       setState({ status: "idle", phoneNumber: null })
     }
-  }, [clearOptimistic])
+  }, [clearWatchdog])
 
   return { state, beginLocalCalling, cancelLocalCalling }
 }
