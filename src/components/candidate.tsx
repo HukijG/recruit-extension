@@ -9,6 +9,7 @@ import { COLD_CALL_TYPE, localStore } from "~lib/constants"
 import {
   CallConfigContext,
   CallerIdPickerContext,
+  CallStatsRefreshContext,
   CallStreamContext,
   TextSlotContext
 } from "~lib/contexts"
@@ -212,6 +213,7 @@ function samePhone(a: string | null, b: string | null): boolean {
 function CallButton({ phoneNumber }: { phoneNumber: string | null }) {
   const callConfig = useContext(CallConfigContext)
   const callStream = useContext(CallStreamContext)
+  const callStatsRefresh = useContext(CallStatsRefreshContext)
   const [extensionSecret] = useStorage<string>(
     { key: "extensionSecret", instance: localStore },
     ""
@@ -276,6 +278,10 @@ function CallButton({ phoneNumber }: { phoneNumber: string | null }) {
       // `in_progress` response; the hook's 10s watchdog reverts silently to
       // idle if discovery never lands (errors, no-active-call responses, or
       // just silence) so the user can retry.
+      // Tick the daily-calls badge: the worker increments on call accept,
+      // so an immediate refresh shows the new count without waiting for
+      // the 10-min fallback timer.
+      callStatsRefresh?.()
       return
     }
 

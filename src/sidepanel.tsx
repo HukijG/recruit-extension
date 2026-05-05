@@ -2,6 +2,7 @@ import { sendToBackground } from "@plasmohq/messaging"
 import { useStorage } from "@plasmohq/storage/hook"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
+import { CallStatsBadge } from "~components/call-stats-badge"
 import {
   CandidateView,
   ErrorToast,
@@ -25,11 +26,13 @@ import {
 import { SettingsButton, SettingsPopover } from "~components/settings-popover"
 import { TestCallView } from "~components/test-call"
 import { TextPopover } from "~components/text-popover"
+import { useCallStats } from "~lib/callStats"
 import { useCallStream } from "~lib/callStream"
 import { localStore, UNDO_DELAY_MS } from "~lib/constants"
 import {
   CallConfigContext,
   CallerIdPickerContext,
+  CallStatsRefreshContext,
   CallStreamContext,
   TextSlotContext
 } from "~lib/contexts"
@@ -616,6 +619,11 @@ function SidePanel() {
     []
   )
 
+  // Daily-call-count badge (top-left). Refreshes on mount + 10-min timer +
+  // on /dialpad-hangup success (CallButton consumes CallStatsRefreshContext
+  // to fire the post-call refresh).
+  const callStats = useCallStats()
+
   // Polled call-state hook (POST /extension-call-status). Mounted once at
   // the sidepanel level so candidate-mode and test_call-mode share state.
   // Polling itself is gated on status — only runs while there's an active
@@ -888,8 +896,10 @@ function SidePanel() {
   const canSend = checkedCount > 0
 
   return (
+    <CallStatsRefreshContext.Provider value={callStats.refresh}>
     <div style={styles.container}>
       <SettingsButton onClick={() => setSettingsOpen(true)} />
+      <CallStatsBadge daily={callStats.daily} />
       {settingsOpen && (
         <SettingsPopover
           initialName={consultantFirstName ?? ""}
@@ -1085,6 +1095,7 @@ function SidePanel() {
         </>
       )}
     </div>
+    </CallStatsRefreshContext.Provider>
   )
 }
 
