@@ -271,11 +271,11 @@ function CallButton({ phoneNumber }: { phoneNumber: string | null }) {
     )
 
     if (resp?.ok) {
-      // 200 means the worker accepted the call and is discovering the call_id
-      // via Dialpad's call-list. Polling flips us to `active` on the first
-      // `in_progress` response; the hook's 10s watchdog reverts silently to
-      // idle if discovery never lands (errors, no-active-call responses, or
-      // just silence) so the user can retry.
+      // 200 means the worker accepted the call. The hook optimistically
+      // flips to `active` (red Hangup) 2s after beginLocalCalling so the
+      // user gets a usable Hangup button without waiting for call_id
+      // discovery; polling will overtake the timer if `in_progress` arrives
+      // sooner. Once active, only an `ended` wire event or hangup leaves.
       return
     }
 
