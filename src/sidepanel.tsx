@@ -22,6 +22,7 @@ import {
   StatusDisplay,
   styles
 } from "~components/sync"
+import { SettingsButton, SettingsPopover } from "~components/settings-popover"
 import { TestCallView } from "~components/test-call"
 import { TextPopover } from "~components/text-popover"
 import { useCallStream } from "~lib/callStream"
@@ -307,6 +308,14 @@ function SidePanel() {
     { key: "extensionSecret", instance: localStore },
     ""
   )
+  // Lifted to the sidepanel level so the universal Settings popover can read
+  // and write it from any mode (previously only the sync flow's
+  // EditableNameHeading touched it).
+  const [consultantFirstName, setConsultantFirstName] = useStorage<string>(
+    { key: "consultantFirstName", instance: localStore },
+    ""
+  )
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [candidateResults, setCandidateResults] = useState<CandidateResult[]>([])
   const [sendProgress, setSendProgress] = useState("")
   const [jobs, setJobs] = useState<RFJob[]>([])
@@ -880,6 +889,18 @@ function SidePanel() {
 
   return (
     <div style={styles.container}>
+      <SettingsButton onClick={() => setSettingsOpen(true)} />
+      {settingsOpen && (
+        <SettingsPopover
+          initialName={consultantFirstName ?? ""}
+          initialSecret={extensionSecret ?? ""}
+          onSave={(name, secret) => {
+            setConsultantFirstName(name)
+            setExtensionSecret(secret)
+          }}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
       {mode === "candidate" && (
         <CallStreamContext.Provider value={callStreamSlot}>
           <CallConfigContext.Provider value={callConfig}>
