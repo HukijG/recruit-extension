@@ -15,5 +15,7 @@ rf-candidate-added-information.json
 # TypeScript incremental build cache
 tsconfig.tsbuildinfo
 
-# This project uses pnpm; the npm lockfile is a stray
+# Root project uses pnpm; npm lockfiles at this level are a stray.
+# mobile/ subapp is on npm so its lockfile is exempted explicitly.
 package-lock.json
+!mobile/package-lock.json

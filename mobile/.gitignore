@@ -1,0 +1,14 @@
+node_modules
+dist
+dist-ssr
+.env
+.env.local
+.env.*.local
+*.log
+.vite
+.DS_Store
+
+# Capacitor-generated native project. Regenerable via `npx cap add android`.
+# Track only when you start customizing native code or shipping APKs.
+android
+ios

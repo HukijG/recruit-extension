@@ -1,0 +1,12 @@
+{
+  "name": "Recruiter Pipeline",
+  "short_name": "Pipeline",
+  "description": "Walk around the office and call sourced candidates from your jobs.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#0a66c2",
+  "icons": []
+}
