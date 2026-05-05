@@ -273,8 +273,9 @@ function CallButton({ phoneNumber }: { phoneNumber: string | null }) {
     if (resp?.ok) {
       // 200 means the worker accepted the call and is discovering the call_id
       // via Dialpad's call-list. Polling flips us to `active` on the first
-      // `in_progress` response; the hook's 10s watchdog reverts silently if
-      // discovery never lands.
+      // `in_progress` response. No watchdog — the button stays grey
+      // indefinitely while we wait, by request. Stuck-grey is preferable
+      // to silently reverting while a real call connects in the background.
       return
     }
 

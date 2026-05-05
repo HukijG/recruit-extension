@@ -231,7 +231,13 @@ function CallButton({ phoneNumber }: { phoneNumber: string | null }) {
       secret: extensionSecret
     })
 
-    if (resp.ok) return
+    if (resp.ok) {
+      // 200 means the worker accepted the call. Polling flips us to `active`
+      // on the first `in_progress` response. No watchdog — the button stays
+      // grey indefinitely while we wait, by request. Stuck-grey is preferable
+      // to silently reverting while a real call connects in the background.
+      return
+    }
 
     callStream?.cancelLocalCalling()
 

@@ -9,14 +9,18 @@ import type { CallStreamState } from "~/lib/types"
 //
 // State machine (3 values, internal-only):
 //   idle    → button shows "Call"
-//   calling → button shows "Calling…" (disabled)
+//   calling → button shows "Calling…" (disabled, grey indefinitely)
 //   active  → button shows "Hangup"  (red, enabled)
+//
+// No watchdog timeout: the button stays in `calling` until polling sees
+// `in_progress` (→ active) or the caller invokes cancelLocalCalling on a
+// /dialpad-call rejection. Stuck-grey is preferable to silently reverting
+// while a real call connects in the background.
 
 const MIDDLEWARE_URL = import.meta.env.VITE_MIDDLEWARE_URL
 const ROUTE_PATH = "/extension-call-status"
 
 const POLL_INTERVAL_MS = 500
-const CALLING_WATCHDOG_MS = 10_000
 
 export interface UseCallStreamReturn {
   state: CallStreamState
@@ -38,17 +42,9 @@ export function useCallStream(): UseCallStreamReturn {
   const stateRef = useRef(state)
   stateRef.current = state
 
-  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const inFlightRef = useRef<AbortController | null>(null)
   const pollRef = useRef<() => Promise<void>>(async () => {})
-
-  const clearWatchdog = useCallback(() => {
-    if (watchdogRef.current) {
-      clearTimeout(watchdogRef.current)
-      watchdogRef.current = null
-    }
-  }, [])
 
   const stopPolling = useCallback(() => {
     if (intervalRef.current) {
@@ -61,12 +57,15 @@ export function useCallStream(): UseCallStreamReturn {
     }
   }, [])
 
+  // Apply a wire response. in_progress flips calling→active and is a no-op
+  // while active; ended terminates active but is ignored while calling
+  // (we trust the caller to cancel via cancelLocalCalling on a /dialpad-call
+  // rejection — there's no automatic give-up on the calling state).
   const applyWireState = useCallback(
     (wire: WireState) => {
       const prev = stateRef.current.status
       if (wire === "in_progress") {
         if (prev === "calling") {
-          clearWatchdog()
           setState((s) => ({ status: "active", phoneNumber: s.phoneNumber }))
         }
         return
@@ -77,7 +76,7 @@ export function useCallStream(): UseCallStreamReturn {
         setState({ status: "idle", phoneNumber: null })
       }
     },
-    [clearWatchdog, stopPolling]
+    [stopPolling]
   )
 
   const poll = useCallback(async () => {
@@ -107,7 +106,6 @@ export function useCallStream(): UseCallStreamReturn {
         )
         stopPolling()
         if (stateRef.current.status !== "idle") {
-          clearWatchdog()
           setState({ status: "idle", phoneNumber: null })
         }
         return
@@ -139,18 +137,17 @@ export function useCallStream(): UseCallStreamReturn {
         inFlightRef.current = null
       }
     }
-  }, [
-    applyWireState,
-    clearWatchdog,
-    consultantFirstName,
-    extensionSecret,
-    stopPolling
-  ])
+  }, [applyWireState, consultantFirstName, extensionSecret, stopPolling])
 
   useEffect(() => {
     pollRef.current = poll
   }, [poll])
 
+  // Kick off polling the instant status leaves idle. The first `void
+  // pollRef.current()` fires synchronously so the worst-case wait to see
+  // `in_progress` is one network round-trip, not POLL_INTERVAL_MS + RTT.
+  // setInterval then maintains the 500ms cadence until status returns to
+  // idle (cancel, ended, or auth failure).
   useEffect(() => {
     if (state.status === "idle") {
       stopPolling()
@@ -166,30 +163,22 @@ export function useCallStream(): UseCallStreamReturn {
   useEffect(() => {
     return () => {
       stopPolling()
-      clearWatchdog()
     }
-  }, [stopPolling, clearWatchdog])
+  }, [stopPolling])
 
-  const beginLocalCalling = useCallback(
-    (phoneNumber: string) => {
-      setState({ status: "calling", phoneNumber })
-      clearWatchdog()
-      watchdogRef.current = setTimeout(() => {
-        watchdogRef.current = null
-        if (stateRef.current.status === "calling") {
-          setState({ status: "idle", phoneNumber: null })
-        }
-      }, CALLING_WATCHDOG_MS)
-    },
-    [clearWatchdog]
-  )
+  const beginLocalCalling = useCallback((phoneNumber: string) => {
+    // Stamp the dialed phone so per-candidate views can phone-match
+    // state.phoneNumber and only show Calling…/Hangup on the right profile.
+    // The polling effect picks up the calling status and starts hitting
+    // /extension-call-status immediately.
+    setState({ status: "calling", phoneNumber })
+  }, [])
 
   const cancelLocalCalling = useCallback(() => {
-    clearWatchdog()
     if (stateRef.current.status === "calling") {
       setState({ status: "idle", phoneNumber: null })
     }
-  }, [clearWatchdog])
+  }, [])
 
   return { state, beginLocalCalling, cancelLocalCalling }
 }
