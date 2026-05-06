@@ -27,14 +27,10 @@ if (
       to   { opacity: 1; }
     }
 
-    /* ----- Gear icon (fixed top-right, sits above page content but
-       below modal backdrops at z-index 200 so any open modal dims it
-       just like the rest of the page). ----- */
+    /* ----- Gear icon (lives inside HeaderBar; sizes/positions via flex
+       parent, no fixed overlay). Modal backdrops at z-index 200 still
+       cover it via document flow — they cover the whole panel. ----- */
     .lr-settings-icon-btn {
-      position: fixed;
-      top: 12px;
-      right: 12px;
-      z-index: 100;
       width: 30px;
       height: 30px;
       flex-shrink: 0;

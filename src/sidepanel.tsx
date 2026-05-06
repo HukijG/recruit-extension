@@ -2,12 +2,12 @@ import { sendToBackground } from "@plasmohq/messaging"
 import { useStorage } from "@plasmohq/storage/hook"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import { CallStatsBadge } from "~components/call-stats-badge"
 import {
   CandidateView,
   ErrorToast,
   UndoToast
 } from "~components/candidate"
+import { HeaderBar } from "~components/header-bar"
 import {
   AuthSecretInput,
   buildPayload,
@@ -23,7 +23,7 @@ import {
   StatusDisplay,
   styles
 } from "~components/sync"
-import { SettingsButton, SettingsPopover } from "~components/settings-popover"
+import { SettingsPopover } from "~components/settings-popover"
 import { TestCallView } from "~components/test-call"
 import { TextPopover } from "~components/text-popover"
 import { useCallStats } from "~lib/callStats"
@@ -898,8 +898,10 @@ function SidePanel() {
   return (
     <CallStatsRefreshContext.Provider value={callStats.refresh}>
     <div style={styles.container}>
-      <SettingsButton onClick={() => setSettingsOpen(true)} />
-      <CallStatsBadge daily={callStats.daily} />
+      <HeaderBar
+        daily={callStats.daily}
+        onSettingsClick={() => setSettingsOpen(true)}
+      />
       {settingsOpen && (
         <SettingsPopover
           initialName={consultantFirstName ?? ""}

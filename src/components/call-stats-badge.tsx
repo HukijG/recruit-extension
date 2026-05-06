@@ -1,7 +1,7 @@
-// Daily-calls badge — fixed top-left pill, mirror of the Settings gear's
-// fixed top-right placement. Stays visible across all sidepanel modes
-// (sync, candidate, test_call) so the consultant always sees their
-// running count.
+// Daily-calls badge — pill that lives inside HeaderBar at the top of every
+// sidepanel mode (sync, candidate, test_call) so the consultant always
+// sees their running count. Used to be a fixed-position overlay; now it
+// sizes/positions via the header's flex layout.
 
 const STATS_BADGE_STYLE_ATTR = "data-lr-stats-badge-styles"
 if (
@@ -12,10 +12,6 @@ if (
   styleEl.setAttribute(STATS_BADGE_STYLE_ATTR, "")
   styleEl.textContent = `
     .lr-stats-badge {
-      position: fixed;
-      top: 12px;
-      left: 12px;
-      z-index: 100;
       display: inline-flex;
       align-items: center;
       gap: 6px;
