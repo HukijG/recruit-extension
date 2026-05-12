@@ -1,7 +1,12 @@
 import { sendToBackground } from "@plasmohq/messaging"
-import { useStorage } from "@plasmohq/storage/hook"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
+import {
+  AuthProvider,
+  RequireAuth,
+  useNeedsReconnectListener
+} from "~auth/AuthProvider"
+import { LoginScreen } from "~auth/LoginScreen"
 import {
   CandidateView,
   ErrorToast,
@@ -9,7 +14,6 @@ import {
 } from "~components/candidate"
 import { HeaderBar } from "~components/header-bar"
 import {
-  AuthSecretInput,
   buildPayload,
   CandidateList,
   CandidateResultsList,
@@ -28,7 +32,7 @@ import { TestCallView } from "~components/test-call"
 import { TextPopover } from "~components/text-popover"
 import { useCallStats } from "~lib/callStats"
 import { useCallStream } from "~lib/callStream"
-import { localStore, UNDO_DELAY_MS } from "~lib/constants"
+import { UNDO_DELAY_MS } from "~lib/constants"
 import {
   CallConfigContext,
   CallerIdPickerContext,
@@ -296,7 +300,14 @@ if (!document.querySelector("[data-lr-sync-styles]")) {
 
 // --- Main Component ---
 
-function SidePanel() {
+function SidePanelInner() {
+  // useStorage will already re-render on auth-storage change; this listener
+  // is the explicit entry point for snap-effects on the lr-needs-reconnect
+  // broadcast. Empty body today — future hooks attach here. useCallback so
+  // the underlying chrome.runtime listener install isn't churned per render.
+  const handleNeedsReconnect = useCallback(() => {}, [])
+  useNeedsReconnectListener(handleNeedsReconnect)
+
   const [workflowState, setWorkflowState] =
     useState<WorkflowState>("not_on_pipeline")
   const [pageInfo, setPageInfo] = useState<PageInfo | null>(null)
@@ -307,17 +318,6 @@ function SidePanel() {
   >([])
   const [csvError, setCsvError] = useState("")
   const [csvFileName, setCsvFileName] = useState("")
-  const [extensionSecret, setExtensionSecret] = useStorage<string>(
-    { key: "extensionSecret", instance: localStore },
-    ""
-  )
-  // Lifted to the sidepanel level so the universal Settings popover can read
-  // and write it from any mode (previously only the sync flow's
-  // EditableNameHeading touched it).
-  const [consultantFirstName, setConsultantFirstName] = useStorage<string>(
-    { key: "consultantFirstName", instance: localStore },
-    ""
-  )
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [candidateResults, setCandidateResults] = useState<CandidateResult[]>([])
   const [sendProgress, setSendProgress] = useState("")
@@ -512,7 +512,7 @@ function SidePanel() {
 
       const resp = await sendToBackground<any, { ok: boolean; data?: CandidateDetails; error?: string }>({
         name: "fetchCandidateDetails",
-        body: { profileUrl: urlResp.profileUrl, secret: extensionSecret }
+        body: { profileUrl: urlResp.profileUrl }
       }).catch((err): { ok: boolean; data?: CandidateDetails; error?: string } => ({ ok: false, error: err?.message ?? "Network error" }))
 
       if (token !== requestTokenRef.current) return
@@ -533,7 +533,7 @@ function SidePanel() {
         markInvalid: { status: "idle" }
       })
     },
-    [extensionSecret]
+    []
   )
 
   useEffect(() => {
@@ -578,8 +578,7 @@ function SidePanel() {
       error?: string
     }
     sendToBackground<unknown, CtxResp>({
-      name: "getDialpadUserContext",
-      body: { secret: extensionSecret }
+      name: "getDialpadUserContext"
     })
       .then((resp) => {
         if (cancelled) return
@@ -606,7 +605,7 @@ function SidePanel() {
     return () => {
       cancelled = true
     }
-  }, [mode, extensionSecret])
+  }, [mode])
 
   // Close any open SMS popover when the user navigates to a different
   // candidate so the popover never shows stale fullName/phoneNumber.
@@ -659,7 +658,7 @@ function SidePanel() {
 
       const resp = await sendToBackground<any, { ok: boolean; error?: string }>({
         name: "markNumberInvalid",
-        body: { rfId, secret: extensionSecret }
+        body: { rfId }
       }).catch((err) => ({ ok: false, error: err?.message ?? "Network error" }))
 
       // Track whether the response committed against the current candidate.
@@ -685,7 +684,7 @@ function SidePanel() {
         setTimeout(() => setErrorToast(null), 5000)
       }
     },
-    [extensionSecret]
+    []
   )
 
   const handleArmMarkInvalid = useCallback(() => {
@@ -721,8 +720,7 @@ function SidePanel() {
 
   const handleSync = useCallback(async () => {
     // Full reset of transient state so each sync starts from the same baseline
-    // a fresh page+extension load gives us. extensionSecret is
-    // useStorage-backed and intentionally preserved.
+    // a fresh page+extension load gives us.
     resetTransientState()
     setWorkflowState("loading")
     setLoadStatus("Loading candidates...")
@@ -816,7 +814,7 @@ function SidePanel() {
     setSendProgress(`Sending ${toSend.length} candidates...`)
 
     const payloads = toSend.map(buildPayload)
-    const result = await sendCandidatesBatch(payloads, extensionSecret)
+    const result = await sendCandidatesBatch(payloads)
 
     if (!result.ok || !result.data) {
       setSendProgress(`Failed — ${result.error}`)
@@ -843,7 +841,7 @@ function SidePanel() {
     if (data.errors) parts.push(`${data.errors} failed`)
     setSendProgress(parts.join(", ") || "0 processed")
     setWorkflowState("complete")
-  }, [matchedCandidates, extensionSecret])
+  }, [matchedCandidates])
 
   const handleAddToJob = useCallback(async () => {
     if (!selectedJobId || rfIds.length === 0) return
@@ -852,7 +850,7 @@ function SidePanel() {
     setWorkflowState("adding_to_job")
     setJobAddResult("")
 
-    const result = await addCandidatesToJob(rfIds, selectedJobId, extensionSecret)
+    const result = await addCandidatesToJob(rfIds, selectedJobId)
 
     if (!result.ok || !result.data) {
       setJobAddResult(`Failed — ${result.error}`)
@@ -878,7 +876,7 @@ function SidePanel() {
     if (errors) parts.push(`${errors} failed`)
     setJobAddResult(parts.join(", ") || `0 added to ${jobName}`)
     setWorkflowState("job_added")
-  }, [extensionSecret, selectedJobId, rfIds, jobs])
+  }, [selectedJobId, rfIds, jobs])
 
   const handleReset = useCallback(() => {
     resetTransientState()
@@ -903,15 +901,7 @@ function SidePanel() {
         onSettingsClick={() => setSettingsOpen(true)}
       />
       {settingsOpen && (
-        <SettingsPopover
-          initialName={consultantFirstName ?? ""}
-          initialSecret={extensionSecret ?? ""}
-          onSave={(name, secret) => {
-            setConsultantFirstName(name)
-            setExtensionSecret(secret)
-          }}
-          onClose={() => setSettingsOpen(false)}
-        />
+        <SettingsPopover onClose={() => setSettingsOpen(false)} />
       )}
       {mode === "candidate" && (
         <CallStreamContext.Provider value={callStreamSlot}>
@@ -996,7 +986,6 @@ function SidePanel() {
 
           {workflowState === "csv_matched" && matchedCandidates.length > 0 && (
             <>
-              <AuthSecretInput secret={extensionSecret} onSecretChange={setExtensionSecret} />
               <ReviewTable
                 matched={matchedCandidates}
                 onToggle={toggleCandidate}
@@ -1098,6 +1087,16 @@ function SidePanel() {
       )}
     </div>
     </CallStatsRefreshContext.Provider>
+  )
+}
+
+function SidePanel() {
+  return (
+    <AuthProvider>
+      <RequireAuth fallback={<LoginScreen />}>
+        <SidePanelInner />
+      </RequireAuth>
+    </AuthProvider>
   )
 }
 

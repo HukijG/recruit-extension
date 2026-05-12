@@ -149,13 +149,12 @@ export function buildPayload(m: MatchedCandidate): CandidatePayload {
 }
 
 export async function sendCandidatesBatch(
-  candidates: CandidatePayload[],
-  secret?: string
+  candidates: CandidatePayload[]
 ): Promise<{ ok: boolean; data?: SendCandidatesResponse; error?: string }> {
   try {
     const result = await sendToBackground({
       name: "sendCandidates",
-      body: { candidates, secret }
+      body: { candidates }
     })
     return result ?? { ok: false, error: "No response from background" }
   } catch (err: any) {
@@ -166,13 +165,12 @@ export async function sendCandidatesBatch(
 
 export async function addCandidatesToJob(
   rfIds: number[],
-  jobId: number,
-  secret?: string
+  jobId: number
 ): Promise<{ ok: boolean; data?: AddToJobResponse; error?: string }> {
   try {
     const result = await sendToBackground({
       name: "addToJob",
-      body: { rfIds, jobId, secret }
+      body: { rfIds, jobId }
     })
     return result ?? { ok: false, error: "No response from background" }
   } catch (err: any) {
