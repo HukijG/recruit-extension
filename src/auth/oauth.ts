@@ -61,10 +61,13 @@ export function buildAuthorizationUrl(args: {
   pkce: PkceMaterial
 }): URL {
   // `authorization_endpoint` is optional on the discovery type but required
-  // for OIDC; the non-null assertion is correct here because CF Access always
-  // returns one. If it ever doesn't, URL construction will throw and the
-  // caller surfaces it as an auth failure.
-  const u = new URL(args.as.authorization_endpoint!)
+  // for OIDC. CF Access always returns one; if discovery ever omits it the
+  // tenant is misconfigured and we throw a typed error instead of letting
+  // `new URL(undefined!)` produce an opaque TypeError.
+  if (!args.as.authorization_endpoint) {
+    throw new Error("Discovery response missing authorization_endpoint")
+  }
+  const u = new URL(args.as.authorization_endpoint)
   u.searchParams.set("client_id", args.clientId)
   u.searchParams.set("redirect_uri", args.redirectUri)
   u.searchParams.set("response_type", "code")
