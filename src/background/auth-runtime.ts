@@ -305,10 +305,20 @@ async function doRefresh(): Promise<string> {
 
 export function refresh(): Promise<string> {
   if (refreshInFlight) return refreshInFlight
-  refreshInFlight = doRefresh()
-  refreshInFlight.finally(() => {
-    refreshInFlight = null
-  })
+  // Clear the lock inside the body — settle then reset, mirrors the
+  // `getAuthorizationServer` pattern in `oauth.ts`. We deliberately avoid
+  // `inFlight.finally(() => { inFlight = null })` because `.finally()`
+  // returns a new promise; if doRefresh rejects, that new promise also
+  // rejects and — since we'd otherwise drop the reference — surfaces as
+  // an `unhandledrejection` in the service worker even though every
+  // awaiting caller has its own catch.
+  refreshInFlight = (async () => {
+    try {
+      return await doRefresh()
+    } finally {
+      refreshInFlight = null
+    }
+  })()
   return refreshInFlight
 }
 
