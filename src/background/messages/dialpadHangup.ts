@@ -1,46 +1,32 @@
 import type { PlasmoMessaging } from "@plasmohq/messaging"
-import { Storage } from "@plasmohq/storage"
 
-const MIDDLEWARE_URL = process.env.PLASMO_PUBLIC_MIDDLEWARE_URL
+import {
+  authFetch,
+  buildMiddlewareUrl,
+  NotAuthenticatedError
+} from "~background/auth-runtime"
+
 const ROUTE_PATH = "/dialpad-hangup"
 
-// Wraps the middleware's POST /dialpad-hangup. Body is just
-// { consultantFirstName } — the worker holds the active call_id in KV
-// (written when the matching Dialpad `calling` event landed), so the
-// extension never needs to track or forward a call_id.
+// Wraps the middleware's POST /dialpad-hangup. The worker holds the active
+// call_id in KV (written when the matching Dialpad `calling` event landed),
+// so the extension never needs to track or forward a call_id.
 //
 // The 409 status (`No active call`) is a soft error, surfaced by the
 // CallButton as inline UX rather than a crash; we forward `status` so
 // the caller can branch on it.
+//
+// consultantFirstName dropped per JWT contract — the middleware identifies
+// the user from the Bearer token.
 const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
-  if (!MIDDLEWARE_URL) {
-    res.send({
-      ok: false,
-      error:
-        "Middleware URL not configured at build time. Rebuild with .env.{development,production} set."
-    })
-    return
-  }
-
-  const { secret } = req.body ?? {}
-
-  const localStore = new Storage({ area: "local" })
-  const consultantFirstName =
-    (await localStore.get<string>("consultantFirstName")) ?? ""
-
-  const url = `${MIDDLEWARE_URL.replace(/\/+$/, "")}${ROUTE_PATH}`
-  const headers: Record<string, string> = { "Content-Type": "application/json" }
-  if (secret) headers["X-Extension-Token"] = secret
-
   try {
-    const resp = await fetch(url, {
+    const resp = await authFetch(buildMiddlewareUrl(ROUTE_PATH), {
       method: "POST",
-      headers,
-      body: JSON.stringify({ consultantFirstName })
+      body: JSON.stringify({})
     })
 
     if (!resp.ok) {
-      let body: any = null
+      let body: { error?: unknown } | null = null
       try {
         body = await resp.json()
       } catch {}
@@ -62,8 +48,12 @@ const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
 
     const data = await resp.json().catch(() => ({}))
     res.send({ ok: true, data })
-  } catch (err: any) {
-    res.send({ ok: false, error: err?.message ?? "Network error" })
+  } catch (err) {
+    if (err instanceof NotAuthenticatedError) {
+      res.send({ ok: false, error: "Session expired — please sign in again" })
+      return
+    }
+    res.send({ ok: false, error: (err as Error)?.message ?? "Network error" })
   }
 }
 

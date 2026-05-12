@@ -1,10 +1,16 @@
 import type { PlasmoMessaging } from "@plasmohq/messaging"
-import { Storage } from "@plasmohq/storage"
 
+import {
+  authFetch,
+  buildMiddlewareUrl,
+  NotAuthenticatedError
+} from "~background/auth-runtime"
+import { readSession } from "~auth/storage"
 import type { DialpadUserContext } from "~lib/dialpad"
+import { localStore } from "~lib/constants"
 
-const MIDDLEWARE_URL = process.env.PLASMO_PUBLIC_MIDDLEWARE_URL
 const ROUTE_PATH = "/dialpad-user-context"
+const CACHE_PREFIX = "dialpadUserContext:"
 
 // Cache the middleware response in chrome.storage.local so navigating
 // between candidate pages doesn't re-hit the worker. Caller IDs change
@@ -25,45 +31,32 @@ interface CacheEntry {
 }
 
 const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
-  if (!MIDDLEWARE_URL) {
-    res.send({
-      ok: false,
-      error:
-        "Middleware URL not configured at build time. Rebuild with .env.{development,production} set."
-    })
-    return
-  }
-
-  const localStore = new Storage({ area: "local" })
-  const consultantFirstName =
-    (await localStore.get<string>("consultantFirstName")) ?? ""
-
-  const cacheKey = `dialpadUserContext:${consultantFirstName || "_unknown"}`
-  const force = req.body?.refresh === true
-
-  if (!force) {
-    const cached = await localStore.get<CacheEntry>(cacheKey)
-    if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
-      res.send({
-        ok: true,
-        data: cached.data,
-        cachedAt: cached.fetchedAt,
-        fromCache: true
-      })
+  try {
+    const session = await readSession()
+    if (!session) {
+      res.send({ ok: false, error: "Session expired — please sign in again" })
       return
     }
-  }
 
-  const { secret } = req.body ?? {}
-  const url = `${MIDDLEWARE_URL.replace(/\/+$/, "")}${ROUTE_PATH}`
-  const headers: Record<string, string> = { "Content-Type": "application/json" }
-  if (secret) headers["X-Extension-Token"] = secret
+    const cacheKey = `${CACHE_PREFIX}${session.user.sub}`
+    const force = req.body?.refresh === true
 
-  try {
-    const resp = await fetch(url, {
+    if (!force) {
+      const cached = await localStore.get<CacheEntry>(cacheKey)
+      if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
+        res.send({
+          ok: true,
+          data: cached.data,
+          cachedAt: cached.fetchedAt,
+          fromCache: true
+        })
+        return
+      }
+    }
+
+    const resp = await authFetch(buildMiddlewareUrl(ROUTE_PATH), {
       method: "POST",
-      headers,
-      body: JSON.stringify({ consultantFirstName })
+      body: JSON.stringify({}) // consultantFirstName dropped per JWT contract
     })
 
     if (!resp.ok) {
@@ -78,10 +71,14 @@ const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
 
     const data = (await resp.json()) as DialpadUserContext
     const fetchedAt = Date.now()
-    await localStore.set(cacheKey, { data, fetchedAt })
+    await localStore.set(cacheKey, { data, fetchedAt } satisfies CacheEntry)
     res.send({ ok: true, data, cachedAt: fetchedAt, fromCache: false })
-  } catch (err: any) {
-    res.send({ ok: false, error: err?.message ?? "Network error" })
+  } catch (err) {
+    if (err instanceof NotAuthenticatedError) {
+      res.send({ ok: false, error: "Session expired — please sign in again" })
+      return
+    }
+    res.send({ ok: false, error: (err as Error)?.message ?? "Network error" })
   }
 }
 
