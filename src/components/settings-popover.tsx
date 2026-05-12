@@ -1,14 +1,11 @@
-import { useEffect, useRef, useState } from "react"
+import { LoggedInSection } from "~auth/LoggedInSection"
 
 // --- Settings Popover ---
 //
-// Universal access to consultantFirstName + extensionSecret. Reachable from
-// every mode via a fixed-position gear icon top-right; previously these were
-// only editable inline on the sync flow's not_on_pipeline + csv_matched
-// states. Pattern mirrors text-popover.tsx (dimmed backdrop + animated card
-// + Yes/No confirm split). Two-stage commit: typing only mutates draft state;
-// Save opens an "Are you sure?" confirmation; X with unsaved changes opens
-// "Discard unsaved changes?". No-op close paths fall through silently.
+// Reachable from every mode via the fixed-position gear icon top-right.
+// Now contains only LoggedInSection (OAuth "Signed in as / Log out" flow);
+// the old name + secret fields were replaced when the extension moved to
+// Cloudflare Access OAuth.
 
 const SETTINGS_STYLE_ATTR = "data-lr-settings-styles"
 if (
@@ -219,6 +216,53 @@ if (
       box-shadow: 0 2px 6px rgba(31,157,85,0.32);
     }
     .lr-settings-confirm-yes:active { transform: translateY(1px); }
+
+    /* ----- Log-out button (outlined red pill — mirrors .lr-invalid-btn geometry) ----- */
+    .lr-settings-logout-btn {
+      width: 100%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 13px 14px;
+      background-color: transparent;
+      color: #d23a2c;
+      border: 1px solid #d23a2c;
+      border-radius: 999px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 120ms ease, color 120ms ease,
+                  transform 120ms ease, box-shadow 120ms ease;
+    }
+    .lr-settings-logout-btn:hover {
+      background-color: #d23a2c;
+      color: #ffffff;
+      box-shadow: 0 2px 6px rgba(210,58,44,0.28);
+    }
+    .lr-settings-logout-btn:active { transform: translateY(1px); }
+
+    /* Destructive variant of confirm-yes for the log-out flow */
+    .lr-settings-confirm-yes-destructive {
+      flex: 1 1 0;
+      min-width: 0;
+      padding: 13px 14px;
+      background-color: #d23a2c;
+      color: #ffffff;
+      border: 1px solid #d23a2c;
+      border-radius: 999px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 120ms ease, border-color 120ms ease,
+                  transform 120ms ease, box-shadow 120ms ease;
+      box-shadow: 0 1px 0 rgba(0,0,0,0.04);
+    }
+    .lr-settings-confirm-yes-destructive:hover {
+      background-color: #b8302a;
+      border-color: #b8302a;
+      box-shadow: 0 2px 6px rgba(210,58,44,0.32);
+    }
+    .lr-settings-confirm-yes-destructive:active { transform: translateY(1px); }
   `
   document.head.appendChild(styleEl)
 }
@@ -271,71 +315,7 @@ export function SettingsButton({ onClick }: { onClick: () => void }) {
   )
 }
 
-type ConfirmKind = "save" | "discard" | null
-
-export function SettingsPopover({
-  initialName,
-  initialSecret,
-  onSave,
-  onClose
-}: {
-  initialName: string
-  initialSecret: string
-  onSave: (name: string, secret: string) => void
-  onClose: () => void
-}) {
-  // Drafts seeded once from the props the parent loaded out of storage. Parent
-  // only mounts this popover after both values have resolved, so initial state
-  // is always the truth-of-record at open time.
-  const [draftName, setDraftName] = useState(initialName)
-  const [draftSecret, setDraftSecret] = useState(initialSecret)
-  const [confirming, setConfirming] = useState<ConfirmKind>(null)
-
-  const nameInputRef = useRef<HTMLInputElement>(null)
-  useEffect(() => {
-    nameInputRef.current?.focus()
-    nameInputRef.current?.select()
-  }, [])
-
-  const trimmedName = draftName.trim()
-  const dirty = draftName !== initialName || draftSecret !== initialSecret
-  // Empty name was rejected by the inline EditableNameHeading too; keep the
-  // floor here so commits never write a blank consultantFirstName.
-  const canSave = dirty && trimmedName.length > 0
-
-  const handleSaveClick = () => {
-    if (!canSave) return
-    setConfirming("save")
-  }
-
-  const handleCloseClick = () => {
-    if (dirty) {
-      setConfirming("discard")
-    } else {
-      onClose()
-    }
-  }
-
-  const handleConfirmYes = () => {
-    if (confirming === "save") {
-      onSave(trimmedName, draftSecret)
-      onClose()
-    } else if (confirming === "discard") {
-      onClose()
-    }
-  }
-
-  const handleConfirmNo = () => {
-    setConfirming(null)
-  }
-
-  const confirmPrompt =
-    confirming === "save"
-      ? "Save these changes?"
-      : confirming === "discard"
-        ? "Discard unsaved changes?"
-        : ""
-
+export function SettingsPopover({ onClose }: { onClose: () => void }) {
   return (
     <div
       className="lr-settings-backdrop"
@@ -349,7 +329,7 @@ export function SettingsPopover({
           </h2>
           <button
             type="button"
-            onClick={handleCloseClick}
+            onClick={onClose}
             className="lr-settings-close-btn"
             aria-label="Close settings">
             <CloseIcon />
@@ -357,65 +337,7 @@ export function SettingsPopover({
         </header>
 
         <div style={popoverStyles.fields}>
-          <div className="lr-settings-field">
-            <label htmlFor="lr-settings-name" className="lr-settings-label">
-              Your first name
-            </label>
-            <input
-              ref={nameInputRef}
-              id="lr-settings-name"
-              type="text"
-              className="lr-settings-input"
-              value={draftName}
-              onChange={(e) => setDraftName(e.target.value)}
-              placeholder="e.g. Joel"
-              autoComplete="off"
-            />
-          </div>
-          <div className="lr-settings-field">
-            <label htmlFor="lr-settings-secret" className="lr-settings-label">
-              Extension secret
-            </label>
-            <input
-              id="lr-settings-secret"
-              type="password"
-              className="lr-settings-input"
-              value={draftSecret}
-              onChange={(e) => setDraftSecret(e.target.value)}
-              placeholder="Enter secret…"
-              autoComplete="off"
-            />
-          </div>
-        </div>
-
-        <div style={popoverStyles.footer}>
-          {confirming ? (
-            <div style={popoverStyles.confirmBlock}>
-              <p style={popoverStyles.confirmPrompt}>{confirmPrompt}</p>
-              <div style={popoverStyles.confirmButtons}>
-                <button
-                  type="button"
-                  onClick={handleConfirmNo}
-                  className="lr-settings-confirm-no">
-                  No
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmYes}
-                  className="lr-settings-confirm-yes">
-                  Yes
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={handleSaveClick}
-              disabled={!canSave}
-              className="lr-settings-save-btn">
-              Save
-            </button>
-          )}
+          <LoggedInSection onAfterSignOut={onClose} />
         </div>
       </div>
     </div>
@@ -442,31 +364,5 @@ const popoverStyles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     gap: "14px"
-  },
-  footer: {
-    flexShrink: 0,
-    margin: "20px 0 0 0",
-    display: "flex",
-    flexDirection: "column"
-  },
-  confirmBlock: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "stretch",
-    gap: "10px"
-  },
-  confirmPrompt: {
-    margin: 0,
-    fontSize: "15px",
-    fontWeight: 600,
-    color: "#15171a",
-    textAlign: "center",
-    letterSpacing: "0.01em"
-  },
-  confirmButtons: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "stretch",
-    gap: "10px"
   }
 }
