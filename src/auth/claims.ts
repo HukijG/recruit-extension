@@ -27,9 +27,9 @@ export function resolveDisplayFirstName(
   name: string | null,
   email: string
 ): string {
-  if (givenName && isNonEmptyString(givenName)) return givenName.trim()
+  if (isNonEmptyString(givenName)) return givenName.trim()
 
-  if (name && isNonEmptyString(name)) {
+  if (isNonEmptyString(name)) {
     const first = name.trim().split(/\s+/)[0]
     if (first) return first
   }
