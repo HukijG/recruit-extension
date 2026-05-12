@@ -8,11 +8,11 @@
 // helpers here — see the spec's "Module-placement write-protection"
 // section.
 
-import { localStore } from "~lib/constants"
 import {
   AUTH_FLIGHT_KEY,
   AUTH_SESSION_KEY,
-  AUTH_TRANSIENT_KEY
+  AUTH_TRANSIENT_KEY,
+  localStore
 } from "~lib/constants"
 
 export type AuthUser = {
