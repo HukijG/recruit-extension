@@ -6,7 +6,7 @@
   "author": "Joel Haines",
   "scripts": {
     "dev": "plasmo dev",
-    "prebuild": "dotenv -e .env.production -- node -e \"const missing=[].concat(process.env.PLASMO_PUBLIC_MIDDLEWARE_URL?[]:'PLASMO_PUBLIC_MIDDLEWARE_URL').concat(process.env.PLASMO_PUBLIC_ACCESS_TEAM_DOMAIN?[]:'PLASMO_PUBLIC_ACCESS_TEAM_DOMAIN').concat(process.env.PLASMO_PUBLIC_ACCESS_CLIENT_ID?[]:'PLASMO_PUBLIC_ACCESS_CLIENT_ID').concat(process.env.PLASMO_PUBLIC_ACCESS_AUDIENCE?[]:'PLASMO_PUBLIC_ACCESS_AUDIENCE');if(missing.length){console.error('ERROR: Missing required env vars in .env.production:',missing.join(', '));process.exit(1)}\"",
+    "prebuild": "dotenv -e .env.production -- node -e \"const required=['PLASMO_PUBLIC_MIDDLEWARE_URL','PLASMO_PUBLIC_ACCESS_TEAM_DOMAIN','PLASMO_PUBLIC_ACCESS_CLIENT_ID','PLASMO_PUBLIC_ACCESS_AUDIENCE'];const missing=required.filter(k=>!process.env[k]);if(missing.length){console.error('ERROR: Missing required env vars in .env.production:',missing.join(', '));process.exit(1)}if(process.env.PLASMO_PUBLIC_ACCESS_TEAM_DOMAIN.endsWith('/')){console.error('ERROR: PLASMO_PUBLIC_ACCESS_TEAM_DOMAIN must not have a trailing slash.');process.exit(1)}\"",
     "build": "plasmo build",
     "package": "plasmo package"
   },
