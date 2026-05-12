@@ -4,6 +4,7 @@ import Papa from "papaparse"
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { localStore } from "~lib/constants"
+import { welcomeStyles } from "~lib/styles/welcome"
 import type {
   AddToJobResponse,
   Candidate,
@@ -287,15 +288,15 @@ export function NameSetupGreeting({
   }
 
   return (
-    <div style={styles.greetingHero}>
-      <span style={{ ...styles.wave, ...styles.waveLarge }} aria-hidden="true">
+    <div style={welcomeStyles.greetingHero}>
+      <span style={{ ...welcomeStyles.wave, ...welcomeStyles.waveLarge }} aria-hidden="true">
         👋
       </span>
-      <h1 style={styles.welcomeTitle}>
-        Welcome <span style={styles.welcomeAccent}>aboard</span>
+      <h1 style={welcomeStyles.welcomeTitle}>
+        Welcome <span style={welcomeStyles.welcomeAccent}>aboard</span>
       </h1>
-      <p style={styles.greetingBody}>
-        Tell us your first name so the candidates you sync get attributed to{" "}you in <em style={styles.greetingEmphasis}>Recruiterflow.</em>
+      <p style={welcomeStyles.greetingBody}>
+        Tell us your first name so the candidates you sync get attributed to{" "}you in <em style={welcomeStyles.greetingEmphasis}>Recruiterflow.</em>
       </p>
       <div style={styles.nameSetupRow}>
         <input
@@ -335,7 +336,7 @@ export function NameSetupGreeting({
           Set
         </button>
       </div>
-      <p style={styles.greetingHint}>You can change this anytime.</p>
+      <p style={welcomeStyles.greetingHint}>You can change this anytime.</p>
     </div>
   )
 }
@@ -364,12 +365,12 @@ export function StatusDisplay({
       return <NameSetupGreeting onSetName={setName} />
     }
     return (
-      <div style={styles.greetingHero}>
-        <span style={styles.wave} aria-hidden="true">👋</span>
+      <div style={welcomeStyles.greetingHero}>
+        <span style={welcomeStyles.wave} aria-hidden="true">👋</span>
         <EditableNameHeading name={trimmedName} onChange={setName} />
-        <p style={styles.greetingBody}>
+        <p style={welcomeStyles.greetingBody}>
           Open a LinkedIn Recruiter project to sync profiles to{" "}
-          <em style={styles.greetingEmphasis}>Recruiterflow</em>.
+          <em style={welcomeStyles.greetingEmphasis}>Recruiterflow</em>.
         </p>
       </div>
     )
@@ -1102,27 +1103,6 @@ export const styles: Record<string, React.CSSProperties> = {
     minHeight: "100vh",
     boxSizing: "border-box"
   },
-  greetingHero: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    textAlign: "center",
-    gap: "10px",
-    marginTop: "62px",
-    padding: "0 12px",
-    width: "100%",
-    animation: "fade-up 0.35s ease-out"
-  },
-  wave: {
-    fontSize: "40px",
-    display: "inline-block",
-    transformOrigin: "70% 70%",
-    animation: "wave 2.6s ease-in-out infinite",
-    marginBottom: "4px"
-  },
-  waveLarge: {
-    fontSize: "56px"
-  },
   greetingTitle: {
     fontSize: "26px",
     fontWeight: 600,
@@ -1138,30 +1118,6 @@ export const styles: Record<string, React.CSSProperties> = {
     justifyContent: "center",
     gap: "0px"
   },
-  welcomeTitle: {
-    fontSize: "30px",
-    fontWeight: 700,
-    color: "#0d0d0d",
-    margin: "4px 0 6px 0",
-    lineHeight: 1.2,
-    letterSpacing: "-0.025em",
-    fontFamily:
-      'ui-rounded, "SF Pro Rounded", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif'
-  },
-  welcomeAccent: {
-    background: "linear-gradient(135deg, #0a66c2 0%, #2d8eff 100%)",
-    WebkitBackgroundClip: "text",
-    WebkitTextFillColor: "transparent",
-    backgroundClip: "text",
-    fontWeight: 800
-  },
-  greetingBody: {
-    fontSize: "13.5px",
-    color: "#0e0d0d",
-    lineHeight: 1.55,
-    margin: "2px 0 0 0",
-    maxWidth: "280px"
-  },
   greetingSubtle: {
     fontSize: "14px",
     color: "#1b1b1b",
@@ -1169,17 +1125,6 @@ export const styles: Record<string, React.CSSProperties> = {
     margin: 0,
     maxWidth: "260px",
     fontStyle: "italic"
-  },
-  greetingEmphasis: {
-    color: "#0d82f7",
-    fontStyle: "normal",
-    fontWeight: 600
-  },
-  greetingHint: {
-    fontSize: "14px",
-    color: "#2e2f30",
-    margin: "14px 0 0 0",
-    letterSpacing: "0.01em"
   },
   greetingName: {
     display: "inline-block",
