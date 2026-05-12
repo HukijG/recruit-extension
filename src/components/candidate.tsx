@@ -1,11 +1,10 @@
 import { sendToBackground } from "@plasmohq/messaging"
-import { useStorage } from "@plasmohq/storage/hook"
 import { useContext, useEffect, useMemo, useState } from "react"
 
 import { Select } from "~components/select"
 import { TextButton } from "~components/text-popover"
 import { styles as syncStyles } from "~components/sync"
-import { COLD_CALL_TYPE, localStore } from "~lib/constants"
+import { COLD_CALL_TYPE } from "~lib/constants"
 import {
   CallConfigContext,
   CallerIdPickerContext,
@@ -214,10 +213,6 @@ function CallButton({ phoneNumber }: { phoneNumber: string | null }) {
   const callConfig = useContext(CallConfigContext)
   const callStream = useContext(CallStreamContext)
   const callStatsRefresh = useContext(CallStatsRefreshContext)
-  const [extensionSecret] = useStorage<string>(
-    { key: "extensionSecret", instance: localStore },
-    ""
-  )
 
   // Local overlays — kept narrow so candidate switches (which remount this
   // component via CandidateView's phase transitions) wipe the slate. By
@@ -262,8 +257,7 @@ function CallButton({ phoneNumber }: { phoneNumber: string | null }) {
       name: "initiateDialpadCall",
       body: {
         phoneNumber,
-        callerAliasId: callConfig.callerAliasId,
-        secret: extensionSecret
+        callerAliasId: callConfig.callerAliasId
       }
     }).catch(
       (err): CallRespEnvelope => ({
@@ -310,8 +304,7 @@ function CallButton({ phoneNumber }: { phoneNumber: string | null }) {
     setHangupPending(true)
 
     const resp = await sendToBackground<unknown, HangupRespEnvelope>({
-      name: "dialpadHangup",
-      body: { secret: extensionSecret }
+      name: "dialpadHangup"
     }).catch(
       (err): HangupRespEnvelope => ({
         ok: false,

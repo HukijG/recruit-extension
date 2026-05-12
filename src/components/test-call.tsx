@@ -1,8 +1,7 @@
 import { sendToBackground } from "@plasmohq/messaging"
-import { useStorage } from "@plasmohq/storage/hook"
 import { useEffect, useMemo, useState } from "react"
 
-import { COLD_CALL_TYPE, localStore } from "~lib/constants"
+import { COLD_CALL_TYPE } from "~lib/constants"
 import {
   CallConfigContext,
   CallerIdPickerContext,
@@ -55,10 +54,6 @@ const TEST_CANDIDATE_DETAILS: CandidateDetails = {
 }
 
 export function TestCallView({ onExit }: { onExit: () => void }) {
-  const [extensionSecret] = useStorage<string>(
-    { key: "extensionSecret", instance: localStore },
-    ""
-  )
   const [contextState, setContextState] = useState<UserContextState>({ status: "loading" })
   const [selectedCallerAliasId, setSelectedCallerAliasId] = useState<string>("")
   const [textPopoverOpen, setTextPopoverOpen] = useState(false)
@@ -79,8 +74,7 @@ export function TestCallView({ onExit }: { onExit: () => void }) {
     }
 
     sendToBackground<unknown, CtxResp>({
-      name: "getDialpadUserContext",
-      body: { secret: extensionSecret }
+      name: "getDialpadUserContext"
     })
       .then((resp) => {
         if (cancelled) return
@@ -107,7 +101,7 @@ export function TestCallView({ onExit }: { onExit: () => void }) {
     return () => {
       cancelled = true
     }
-  }, [extensionSecret])
+  }, [])
 
   const candidateState: CandidateState = {
     phase: "ready",

@@ -1,8 +1,7 @@
 import { sendToBackground } from "@plasmohq/messaging"
-import { useStorage } from "@plasmohq/storage/hook"
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import { localStore } from "~lib/constants"
+import { useAuth } from "~auth/AuthProvider"
 
 // Daily-calls counter hook.
 //
@@ -33,25 +32,17 @@ export interface UseCallStatsReturn {
 }
 
 export function useCallStats(): UseCallStatsReturn {
-  const [consultantFirstName] = useStorage<string>(
-    { key: "consultantFirstName", instance: localStore },
-    ""
-  )
-  const [extensionSecret] = useStorage<string>(
-    { key: "extensionSecret", instance: localStore },
-    ""
-  )
+  const { isAuthenticated } = useAuth()
   const [daily, setDaily] = useState<number | null>(null)
   const inFlightRef = useRef(false)
 
   const fetchStats = useCallback(async () => {
     if (inFlightRef.current) return
-    if (!consultantFirstName || !extensionSecret) return
+    if (!isAuthenticated) return
     inFlightRef.current = true
     try {
       const resp = await sendToBackground<unknown, CallStatsResp>({
-        name: "getCallStats",
-        body: { secret: extensionSecret }
+        name: "getCallStats"
       }).catch((err): CallStatsResp => ({
         ok: false,
         error: err?.message ?? "Network error"
@@ -64,9 +55,11 @@ export function useCallStats(): UseCallStatsReturn {
     } finally {
       inFlightRef.current = false
     }
-  }, [consultantFirstName, extensionSecret])
+  }, [isAuthenticated])
 
-  // Mount + cred-resolution: fetch as soon as both creds are available.
+  // Mount + auth-resolution: fetch as soon as the user is authenticated.
+  // Also re-fires on sign-out → sign-in (fetchStats's identity changes with
+  // isAuthenticated), so a fresh sign-in repopulates the badge immediately.
   useEffect(() => {
     void fetchStats()
   }, [fetchStats])
