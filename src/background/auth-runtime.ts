@@ -59,7 +59,10 @@ if (!TEAM_DOMAIN || !CLIENT_ID || !AUDIENCE) {
 }
 
 const CLIENT: Client = { client_id: CLIENT_ID ?? "" }
-const SCOPE = "openid email profile"
+// `offline_access` (OIDC Core §11) is required to get a refresh_token back.
+// CF Access's `scopes_supported` discovery list doesn't advertise it, but CF
+// honors it when "Refresh tokens" is enabled on the App 2 SaaS-OIDC config.
+const SCOPE = "openid email profile offline_access"
 const FLIGHT_TTL_MS = 10 * 60 * 1000
 const REFRESH_LEEWAY_MS = 30_000
 
