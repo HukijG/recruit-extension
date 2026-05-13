@@ -33,6 +33,7 @@ import { TextPopover } from "~components/text-popover"
 import { useCallStats } from "~lib/callStats"
 import { useCallStream } from "~lib/callStream"
 import { UNDO_DELAY_MS } from "~lib/constants"
+import { useTemplateHydration } from "~lib/useTemplateHydration"
 import {
   CallConfigContext,
   CallerIdPickerContext,
@@ -618,10 +619,15 @@ function SidePanelInner() {
     []
   )
 
-  // Daily-call-count badge (top-left). Refreshes on mount + 10-min timer +
-  // on /dialpad-hangup success (CallButton consumes CallStatsRefreshContext
-  // to fire the post-call refresh).
+  // Daily-call-count badge. Hook owns all refresh triggers (mount,
+  // visibility, URL change, 10-min fallback). Manual refreshes are wired
+  // in here: hangup goes through CallStatsRefreshContext below; call-start
+  // is folded into the callStreamSlot wrapper.
   const callStats = useCallStats()
+
+  // One-shot cloud → local template sync. Fires once per mount when the
+  // user becomes authenticated, and only seeds local if it's empty.
+  useTemplateHydration()
 
   // Polled call-state hook (POST /extension-call-status). Mounted once at
   // the sidepanel level so candidate-mode and test_call-mode share state.
@@ -631,13 +637,21 @@ function SidePanelInner() {
   const callStreamSlot = useMemo(
     () => ({
       state: callStream.state,
-      beginLocalCalling: callStream.beginLocalCalling,
+      // Wrap beginLocalCalling to also kick a stats refresh — captures the
+      // common case where the user is checking the badge right after
+      // initiating a call (the more interesting trigger is hangup, which
+      // fires from CallButton via CallStatsRefreshContext below).
+      beginLocalCalling: (phoneNumber: string) => {
+        callStream.beginLocalCalling(phoneNumber)
+        callStats.refresh()
+      },
       cancelLocalCalling: callStream.cancelLocalCalling
     }),
     [
       callStream.state,
       callStream.beginLocalCalling,
-      callStream.cancelLocalCalling
+      callStream.cancelLocalCalling,
+      callStats.refresh
     ]
   )
 
