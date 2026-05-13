@@ -56,9 +56,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 
   const isLoading = sessionLoading || transientLoading
-  const hasValidSession = !!session && session.expiresAt > Date.now()
+  // `session.expiresAt` is the ACCESS-token expiry (OAuth `expires_in` →
+  // milliseconds). It is NOT the session window. As long as we have a
+  // refresh_token stored, the user is still authenticated — getValidToken
+  // in auth-runtime swaps a stale access_token for a fresh one on the
+  // next authFetch, and authFetch reactively retries on 401 auth_jwt_invalid.
+  // Gating UI auth on access-token expiry produced the "5-minute logout"
+  // reported in the 2026-05-23 session-handling investigation.
+  // If the refresh itself fails (revoked / expired refresh_token), the
+  // background wipes the session and writes transient.error="needs_reconnect"
+  // — both of those independently flip isAuthenticated false below.
+  const hasRefreshableSession = !!session && !!session.refreshToken
   const error = transient?.error ?? null
-  const isAuthenticated = hasValidSession && error !== "needs_reconnect"
+  const isAuthenticated = hasRefreshableSession && error !== "needs_reconnect"
 
   const signIn = useCallback(async () => {
     await sendToBackground<unknown, SignInResp>({ name: "auth-sign-in" })

@@ -18,6 +18,7 @@ import {
   AUTH_FLIGHT_KEY,
   AUTH_SESSION_KEY,
   AUTH_TRANSIENT_KEY,
+  LAST_EMAIL_KEY,
   NEEDS_RECONNECT_BROADCAST
 } from "~lib/constants"
 import { buildUserFromClaims } from "~auth/claims"
@@ -41,20 +42,20 @@ import type {
 import { readFlight, readSession, readTransient } from "~auth/storage"
 
 // ---- env (resolved once; fail loudly if missing) ----
+// Audience validation lives in the middleware (ACCESS_AUD_MIDDLEWARE) — the
+// extension only needs the issuer/client pair to drive the PKCE flow.
 
 const TEAM_DOMAIN = process.env.PLASMO_PUBLIC_ACCESS_TEAM_DOMAIN
 const CLIENT_ID = process.env.PLASMO_PUBLIC_ACCESS_CLIENT_ID
-const AUDIENCE = process.env.PLASMO_PUBLIC_ACCESS_AUDIENCE
 
-if (!TEAM_DOMAIN || !CLIENT_ID || !AUDIENCE) {
+if (!TEAM_DOMAIN || !CLIENT_ID) {
   // Logged at module init — surfaces immediately on SW start.
   console.error(
-    "[auth-runtime] Missing required env vars. Got:",
-    {
+    "[auth-runtime] Missing required env vars:",
+    JSON.stringify({
       PLASMO_PUBLIC_ACCESS_TEAM_DOMAIN: !!TEAM_DOMAIN,
-      PLASMO_PUBLIC_ACCESS_CLIENT_ID: !!CLIENT_ID,
-      PLASMO_PUBLIC_ACCESS_AUDIENCE: !!AUDIENCE
-    }
+      PLASMO_PUBLIC_ACCESS_CLIENT_ID: !!CLIENT_ID
+    })
   )
 }
 
@@ -129,7 +130,7 @@ export type SignInOutcome =
   | { ok: false; error: "auth_cancelled" | "auth_failed" }
 
 export async function handleSignIn(): Promise<SignInOutcome> {
-  if (!TEAM_DOMAIN || !CLIENT_ID || !AUDIENCE) {
+  if (!TEAM_DOMAIN || !CLIENT_ID) {
     await writeTransient({ error: "auth_failed" })
     return { ok: false, error: "auth_failed" }
   }
@@ -153,6 +154,10 @@ export async function handleSignIn(): Promise<SignInOutcome> {
   }
   await writeFlight(flight)
 
+  // Best-effort UX hint — if CF Access's OTP page honors OIDC login_hint
+  // it pre-fills the email field. Silently dropped if CF ignores it.
+  const lastEmail = (await localStore.get<string>(LAST_EMAIL_KEY)) ?? ""
+
   let returned: string | undefined
   try {
     const as = await getAS()
@@ -161,7 +166,8 @@ export async function handleSignIn(): Promise<SignInOutcome> {
       clientId: CLIENT_ID,
       redirectUri: REDIRECT_URI,
       scope: SCOPE,
-      pkce
+      pkce,
+      loginHint: lastEmail || undefined
     })
     returned = await chrome.identity.launchWebAuthFlow({
       interactive: true,
@@ -223,6 +229,10 @@ export async function handleSignIn(): Promise<SignInOutcome> {
     await writeSession(session)
     await clearTransient()
     await clearFlight()
+    // Best-effort persist of the email so the NEXT sign-in can pass it as
+    // login_hint. Doesn't gate success — a write failure here just means
+    // the user types their email next time.
+    await localStore.set(LAST_EMAIL_KEY, user.email).catch(() => {})
     return { ok: true }
   } catch (err) {
     console.error("[auth-runtime] sign-in code exchange failed:", err)
@@ -295,6 +305,9 @@ async function doRefresh(): Promise<string> {
     const newSession = mergeRefreshedSession(session, result)
     await writeSession(newSession)
     await clearTransient()
+    // Keep the login_hint email aligned with whatever claims the latest
+    // refresh produced (CF may rotate the id_token on refresh).
+    await localStore.set(LAST_EMAIL_KEY, newSession.user.email).catch(() => {})
     return newSession.accessToken
   } catch (err) {
     // Flight state belongs to the sign-in flow; refresh never touches it.

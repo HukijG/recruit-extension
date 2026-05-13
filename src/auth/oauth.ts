@@ -59,6 +59,10 @@ export function buildAuthorizationUrl(args: {
   redirectUri: string
   scope: string
   pkce: PkceMaterial
+  // OIDC Core 3.1.2.1 `login_hint`. Passed only when we know the user's
+  // last-signed-in email so CF Access's OTP page can pre-fill the input.
+  // If CF ignores it the param is silently dropped — no harm.
+  loginHint?: string
 }): URL {
   // `authorization_endpoint` is optional on the discovery type but required
   // for OIDC. CF Access always returns one; if discovery ever omits it the
@@ -76,6 +80,7 @@ export function buildAuthorizationUrl(args: {
   u.searchParams.set("code_challenge_method", "S256")
   u.searchParams.set("state", args.pkce.state)
   u.searchParams.set("nonce", args.pkce.nonce)
+  if (args.loginHint) u.searchParams.set("login_hint", args.loginHint)
   return u
 }
 
