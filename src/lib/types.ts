@@ -230,3 +230,71 @@ export interface SmsTemplate {
 }
 
 export type TemplateVariable = "firstName"
+
+// --- Music remote (now-playing bar) ---
+//
+// FROZEN CROSS-REPO CONTRACT (byte-identical in the extension, worker, and
+// dashboard repos). These camelCase shapes mirror the NowPlayingSnapshot the
+// Durable Object streams over the worker's WS route. Do NOT diverge from the
+// worker's JSON — if the contract has to change, it changes in all three
+// repos at once.
+
+export interface NowPlayingTrack {
+  loadId: string
+  title: string
+  artists: string
+  album: string
+  artUrl: string
+  durationMs: number
+}
+
+export interface NowPlayingSnapshot {
+  isPlaying: boolean
+  positionMs: number
+  track: NowPlayingTrack | null
+}
+
+// Connection lifecycle for the side-panel DO socket. `idle` is the pre-open
+// state (no candidate mode yet / handshake not started); `connecting` covers
+// the open + initial-snapshot wait; `open` means a snapshot has streamed;
+// `closed` is a clean/expected close; `error` is a failed handshake or drop
+// awaiting backoff reconnect.
+export type MusicWsStatus = "idle" | "connecting" | "open" | "closed" | "error"
+
+// A single Deezer search hit. Deezer ids are numeric (the frozen contract);
+// song actions (enqueue / play) post the dashboard's `{ id }` payload.
+export interface MusicSongResult {
+  id: number
+  title: string
+  artists: string
+  album: string
+  artUrl: string
+  durationMs: number
+}
+
+// A single playlist search hit. Playlist actions post `{ id }`; ids are
+// numeric to match the dashboard.
+export interface MusicPlaylistResult {
+  id: number
+  title: string
+  creator: string
+  artUrl: string
+  trackCount: number
+}
+
+// Cross-mode slot for the now-playing bar. The bar lives as base-page chrome
+// (mounted by sidepanel like global CSS), so the slot carries DATA ONLY — the
+// live snapshot, the connection status, and whether the bar is currently
+// suppressed by an overlay above it. The bar owns all of its own UI; nothing
+// here threads callbacks, mirroring how the data-only call-stream slot is
+// shaped (state in, behaviour owned by the consumer).
+export type MusicRemoteSlot = {
+  snapshot: NowPlayingSnapshot | null
+  status: MusicWsStatus
+  // True while a higher overlay (settings, text composer, template manager,
+  // job modal) covers the panel. The bar reads this to suppress its chrome
+  // and release its reserved height; it does NOT use it to close its own
+  // search overlay (overlay open/closed is the bar's own source of truth so
+  // an incidental blur can never destroy a half-typed query).
+  suppressed: boolean
+} | null
