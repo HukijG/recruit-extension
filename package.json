@@ -6,7 +6,7 @@
   "author": "Joel Haines",
   "scripts": {
     "dev": "plasmo dev",
-    "prebuild": "dotenv -e .env.production -- node -e \"if(!process.env.PLASMO_PUBLIC_MIDDLEWARE_URL){console.error('ERROR: PLASMO_PUBLIC_MIDDLEWARE_URL is unset. Create .env.production with the worker URL.');process.exit(1)}\"",
+    "prebuild": "dotenv -e .env.production -- node -e \"if(!process.env.PLASMO_PUBLIC_MIDDLEWARE_URL){console.error('ERROR: PLASMO_PUBLIC_MIDDLEWARE_URL is unset. Create .env.production with the worker URL.');process.exit(1)}if(!process.env.PLASMO_PUBLIC_MUSIC_URL){console.error('ERROR: PLASMO_PUBLIC_MUSIC_URL is unset. Create .env.production with the music worker URL.');process.exit(1)}\"",
     "build": "plasmo build",
     "package": "plasmo package"
   },
@@ -36,10 +36,11 @@
     ],
     "host_permissions": [
       "https://www.linkedin.com/talent/*",
-      "$PLASMO_PUBLIC_MIDDLEWARE_URL/*"
+      "$PLASMO_PUBLIC_MIDDLEWARE_URL/*",
+      "$PLASMO_PUBLIC_MUSIC_URL/*"
     ],
     "content_security_policy": {
-      "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: https://*.dzcdn.net; connect-src 'self' $PLASMO_PUBLIC_MIDDLEWARE_URL wss:"
+      "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: https://*.dzcdn.net; connect-src 'self' $PLASMO_PUBLIC_MIDDLEWARE_URL $PLASMO_PUBLIC_MUSIC_URL wss:"
     }
   }
 }

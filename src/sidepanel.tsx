@@ -939,11 +939,21 @@ function SidePanel() {
   return (
     <CallStatsRefreshContext.Provider value={callStats.refresh}>
     <MusicRemoteContext.Provider
-      value={{
-        snapshot: music.snapshot,
-        status: music.status,
-        suppressed: sidepanelOverlayOpen
-      }}>
+      value={
+        // Mode-gate the slot like the sibling cross-mode contexts
+        // (CallStreamContext / TextSlotContext): ONLY candidate mode supplies
+        // it. Other modes get the default `null` so the bar self-hides via the
+        // absent slot — not merely an absent snapshot — and the bar's
+        // `if (!slot) setSearchOpen(false)` cleanup fires on mode exit, closing
+        // any open search overlay instead of stranding it over sync/test_call.
+        mode === "candidate"
+          ? {
+              snapshot: music.snapshot,
+              status: music.status,
+              suppressed: sidepanelOverlayOpen
+            }
+          : null
+      }>
     <div style={{ ...styles.container, paddingBottom: containerPaddingBottom }}>
       <HeaderBar
         daily={callStats.daily}

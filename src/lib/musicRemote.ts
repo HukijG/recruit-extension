@@ -42,10 +42,13 @@ import type {
 //   mode that mounts the MusicRemoteContext provider). The hook takes an
 //   `enabled` flag; flipping it false closes the socket and cancels backoff.
 
-const MIDDLEWARE_URL = process.env.PLASMO_PUBLIC_MIDDLEWARE_URL
+// The now-playing WS rides the NEW, DEDICATED music worker (separate from the
+// Recruiterflow/Dialpad middleware), per the frozen cross-repo contract. Both
+// the /music/* HTTP control routes and this WS target PLASMO_PUBLIC_MUSIC_URL.
+const MUSIC_URL = process.env.PLASMO_PUBLIC_MUSIC_URL
 
-// Path on the worker that upgrades to the DO now-playing socket. Part of the
-// frozen contract's "now-playing via the worker's DO WS route".
+// Path on the music worker that upgrades to the DO now-playing socket. Part of
+// the frozen contract's "now-playing via the worker's DO WS route".
 const WS_PATH = "/music/now-playing"
 
 // Interpolation tick. 250ms is smooth enough for a thin progress bar without
@@ -68,13 +71,14 @@ export interface UseMusicRemoteReturn {
   status: MusicWsStatus
 }
 
-// Derive the wss:// origin from the configured https worker origin. The WS
-// shares the public middleware origin (frozen contract); we only swap the
-// scheme. Returns null if the URL is unset/malformed so callers can no-op.
+// Derive the wss:// origin from the configured https music-worker origin. The
+// WS shares the music worker's origin (frozen contract — same base as the
+// /music/* HTTP routes); we only swap the scheme. Returns null if the URL is
+// unset/malformed so callers can no-op.
 function buildWsUrl(): string | null {
-  if (!MIDDLEWARE_URL) return null
+  if (!MUSIC_URL) return null
   try {
-    const u = new URL(MIDDLEWARE_URL)
+    const u = new URL(MUSIC_URL)
     u.protocol = u.protocol === "http:" ? "ws:" : "wss:"
     // Normalise: drop any trailing slash on the base path, then append.
     const base = u.toString().replace(/\/+$/, "")
@@ -234,9 +238,7 @@ export function useMusicRemote(enabled: boolean): UseMusicRemoteReturn {
     ws.onmessage = (event) => {
       let parsed: unknown
       try {
-        parsed = JSON.parse(
-          typeof event.data === "string" ? event.data : ""
-        )
+        parsed = JSON.parse(typeof event.data === "string" ? event.data : "")
       } catch {
         return
       }
@@ -305,7 +307,6 @@ export function useMusicRemote(enabled: boolean): UseMusicRemoteReturn {
 // anchorPositionMs + (now - anchorClock) when playing, clamped to the track
 // duration, and frozen when paused.
 interface InterpAnchor {
-  loadId: number | null
   anchorPositionMs: number
   anchorClock: number
   isPlaying: boolean
@@ -321,12 +322,13 @@ interface InterpAnchor {
 // owns the WS subscription is untouched. This is the whole point of the split:
 // the music feature's high-frequency clock must not leak app-wide.
 //
-// Re-anchoring: on a load-id change we FULLY reset (the display jumps to the
-// new snapshot's position, no monotonic carry-over from the previous track).
-// Within the same track we re-anchor to the snapshot's authoritative position
-// — trusting the worker over our own drift — while the per-tick clamp keeps the
-// DISPLAY monotonic between re-anchors. `enabled` gates the tick so a hidden
-// bar burns no interval.
+// Re-anchoring: every snapshot is authoritative, so the display adopts its
+// position directly — a new-track frame (position ~0) hard-resets, a same-track
+// seek/drift-resync corrects in EITHER direction (a backward seek moves the bar
+// back). The per-tick clamp keeps the DISPLAY monotonic only BETWEEN re-anchors
+// (so interpolation jitter never stutters backward), never overriding an
+// authoritative snapshot. `enabled` gates the tick so a hidden bar burns no
+// interval.
 export function useInterpolatedPosition(
   snapshot: NowPlayingSnapshot | null,
   enabled: boolean
@@ -335,19 +337,16 @@ export function useInterpolatedPosition(
   const anchorRef = useRef<InterpAnchor | null>(null)
 
   // Re-anchor whenever a fresh snapshot lands (new object identity from the
-  // subscription). Reset the display to the snapshot's position on a load-id
-  // change; otherwise re-anchor in place and let the clamp carry the display.
+  // subscription) and adopt its authoritative position directly — the worker
+  // only pushes on a material change or sparse resync, so it's always the truth.
   useEffect(() => {
     if (!snapshot) {
       anchorRef.current = null
       setDisplayPositionMs(0)
       return
     }
-    const loadId = snapshot.track?.loadId ?? null
     const durationMs = snapshot.track?.durationMs ?? 0
-    const prevLoadId = anchorRef.current?.loadId ?? null
     anchorRef.current = {
-      loadId,
       anchorPositionMs: snapshot.positionMs,
       anchorClock: performance.now(),
       isPlaying: snapshot.isPlaying,
@@ -357,12 +356,17 @@ export function useInterpolatedPosition(
       0,
       Math.min(snapshot.positionMs, durationMs || snapshot.positionMs)
     )
-    // On a track change, hard-reset; within a track, never jump backwards on
-    // the display (the tick clamp owns monotonicity), but DO adopt a forward
-    // correction from the worker.
-    setDisplayPositionMs((prev) =>
-      loadId !== prevLoadId ? anchored : Math.max(prev, anchored)
-    )
+    // The snapshot is authoritative on every re-anchor — the worker pushes only
+    // on a MATERIAL change (track / play-pause / seek / stop) plus a sparse
+    // drift-resync, so adopting its position directly is correct in both
+    // directions. A backward `Seeked` MUST move the bar back; clamping to
+    // Math.max(prev, anchored) would freeze the fill until playback caught up.
+    // Monotonicity is the TICK's job (smoothing interpolation between
+    // snapshots), not the re-anchor's — so we never carry a stale forward
+    // position across an authoritative correction. (A load-id change is a
+    // hard-reset; a same-track frame is the seek/resync case — both just take
+    // `anchored`, since the snapshot is the source of truth either way.)
+    setDisplayPositionMs(anchored)
   }, [snapshot])
 
   // Monotonic interpolation tick. Advances the displayed position from the

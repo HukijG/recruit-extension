@@ -1,17 +1,17 @@
 import type { PlasmoMessaging } from "@plasmohq/messaging"
 
-const MIDDLEWARE_URL = process.env.PLASMO_PUBLIC_MIDDLEWARE_URL
+const MUSIC_URL = process.env.PLASMO_PUBLIC_MUSIC_URL
 const ROUTE_PATH = "/music/play"
 
 // Play a song now (jump the queue). Mirrors the dashboard's { id } payload;
 // STRING Deezer id, guarded. Sibling of musicEnqueue — fire-and-forget, truth
 // via the now-playing WS stream.
 const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
-  if (!MIDDLEWARE_URL) {
+  if (!MUSIC_URL) {
     res.send({
       ok: false,
       error:
-        "Middleware URL not configured at build time. Rebuild with .env.{development,production} set."
+        "Music worker URL not configured at build time. Rebuild with .env.{development,production} set (PLASMO_PUBLIC_MUSIC_URL)."
     })
     return
   }
@@ -23,7 +23,7 @@ const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
     return
   }
 
-  const url = `${MIDDLEWARE_URL.replace(/\/+$/, "")}${ROUTE_PATH}`
+  const url = `${MUSIC_URL.replace(/\/+$/, "")}${ROUTE_PATH}`
   const headers: Record<string, string> = { "Content-Type": "application/json" }
   if (secret) headers["X-Extension-Token"] = secret
 

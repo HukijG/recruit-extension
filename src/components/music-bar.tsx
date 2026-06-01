@@ -120,14 +120,6 @@ if (
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .lr-music-idle {
-      margin: 0;
-      font-size: 14px;
-      font-weight: 500;
-      color: #5f6368;
-      line-height: 1.2;
-    }
-
     /* Thin progress line pinned to the very top edge of the bar. */
     .lr-music-progress-track {
       position: absolute;
@@ -428,14 +420,26 @@ if (
 
 function PlayIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+    >
       <path d="M8 5v14l11-7z" />
     </svg>
   )
 }
 function PauseIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+    >
       <rect x="6" y="5" width="4" height="14" rx="1" />
       <rect x="14" y="5" width="4" height="14" rx="1" />
     </svg>
@@ -443,14 +447,26 @@ function PauseIcon() {
 }
 function PrevIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+    >
       <path d="M6 5h2v14H6zM20 5v14l-11-7z" />
     </svg>
   )
 }
 function NextIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+    >
       <path d="M16 5h2v14h-2zM4 5l11 7-11 7z" />
     </svg>
   )
@@ -466,8 +482,13 @@ function VolDownIcon() {
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
-      aria-hidden="true">
-      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" stroke="none" />
+      aria-hidden="true"
+    >
+      <polygon
+        points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"
+        fill="currentColor"
+        stroke="none"
+      />
       <line x1="16" y1="12" x2="22" y2="12" />
     </svg>
   )
@@ -483,8 +504,13 @@ function VolUpIcon() {
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
-      aria-hidden="true">
-      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" stroke="none" />
+      aria-hidden="true"
+    >
+      <polygon
+        points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"
+        fill="currentColor"
+        stroke="none"
+      />
       <line x1="19" y1="9" x2="19" y2="15" />
       <line x1="16" y1="12" x2="22" y2="12" />
     </svg>
@@ -501,7 +527,8 @@ function SearchIcon() {
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
-      aria-hidden="true">
+      aria-hidden="true"
+    >
       <circle cx="11" cy="11" r="7" />
       <line x1="21" y1="21" x2="16.65" y2="16.65" />
     </svg>
@@ -509,8 +536,21 @@ function SearchIcon() {
 }
 function NoteIcon() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M9 17V5l10-2v12" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <path
+        d="M9 17V5l10-2v12"
+        stroke="currentColor"
+        strokeWidth="2"
+        fill="none"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
       <circle cx="6" cy="17" r="3" />
       <circle cx="16" cy="15" r="3" />
     </svg>
@@ -527,7 +567,8 @@ function CloseIcon() {
       strokeWidth="2.6"
       strokeLinecap="round"
       strokeLinejoin="round"
-      aria-hidden="true">
+      aria-hidden="true"
+    >
       <line x1="6" y1="6" x2="18" y2="18" />
       <line x1="18" y1="6" x2="6" y2="18" />
     </svg>
@@ -544,7 +585,8 @@ function ChevronLeftIcon() {
       strokeWidth="2.4"
       strokeLinecap="round"
       strokeLinejoin="round"
-      aria-hidden="true">
+      aria-hidden="true"
+    >
       <polyline points="15 18 9 12 15 6" />
     </svg>
   )
@@ -562,7 +604,11 @@ interface PlaylistDrill {
   songs: MusicSongResult[]
 }
 
-type SongSearchResp = { ok: boolean; results?: MusicSongResult[]; error?: string }
+type SongSearchResp = {
+  ok: boolean
+  results?: MusicSongResult[]
+  error?: string
+}
 type PlaylistSearchResp = {
   ok: boolean
   results?: MusicPlaylistResult[]
@@ -717,13 +763,15 @@ function MusicSearchOverlay({ onClose }: { onClose: () => void }) {
         <button
           type="button"
           className="lr-music-pill lr-music-pill--enqueue"
-          onClick={() => enqueueSong(song)}>
+          onClick={() => enqueueSong(song)}
+        >
           Queue
         </button>
         <button
           type="button"
           className="lr-music-pill lr-music-pill--play"
-          onClick={() => playSong(song)}>
+          onClick={() => playSong(song)}
+        >
           Play
         </button>
       </div>
@@ -735,7 +783,8 @@ function MusicSearchOverlay({ onClose }: { onClose: () => void }) {
       className="lr-music-backdrop"
       role="dialog"
       aria-modal="true"
-      aria-label="Search music">
+      aria-label="Search music"
+    >
       <div className="lr-music-popover">
         <header style={overlayStyles.header}>
           <h2 style={overlayStyles.title}>
@@ -745,7 +794,8 @@ function MusicSearchOverlay({ onClose }: { onClose: () => void }) {
             type="button"
             onClick={onClose}
             className="lr-music-close-btn"
-            aria-label="Close search">
+            aria-label="Close search"
+          >
             <CloseIcon />
           </button>
         </header>
@@ -755,7 +805,8 @@ function MusicSearchOverlay({ onClose }: { onClose: () => void }) {
             type="button"
             className="lr-music-playlist-back"
             style={{ alignSelf: "flex-start", marginBottom: "14px" }}
-            onClick={() => setDrill(null)}>
+            onClick={() => setDrill(null)}
+          >
             <ChevronLeftIcon />
             Back to results
           </button>
@@ -766,14 +817,16 @@ function MusicSearchOverlay({ onClose }: { onClose: () => void }) {
                 type="button"
                 className="lr-music-tab"
                 data-active={tab === "songs"}
-                onClick={() => switchTab("songs")}>
+                onClick={() => switchTab("songs")}
+              >
                 Songs
               </button>
               <button
                 type="button"
                 className="lr-music-tab"
                 data-active={tab === "playlists"}
-                onClick={() => switchTab("playlists")}>
+                onClick={() => switchTab("playlists")}
+              >
                 Playlists
               </button>
             </div>
@@ -782,7 +835,8 @@ function MusicSearchOverlay({ onClose }: { onClose: () => void }) {
               onSubmit={(e) => {
                 e.preventDefault()
                 void runSearch()
-              }}>
+              }}
+            >
               <input
                 ref={inputRef}
                 className="lr-music-search-input"
@@ -790,16 +844,15 @@ function MusicSearchOverlay({ onClose }: { onClose: () => void }) {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={
-                  tab === "songs"
-                    ? "Search songs…"
-                    : "Search playlists…"
+                  tab === "songs" ? "Search songs…" : "Search playlists…"
                 }
                 aria-label="Search query"
               />
               <button
                 type="submit"
                 className="lr-music-search-submit"
-                disabled={searching || !query.trim()}>
+                disabled={searching || !query.trim()}
+              >
                 {searching ? "…" : "Search"}
               </button>
             </form>
@@ -840,7 +893,8 @@ function MusicSearchOverlay({ onClose }: { onClose: () => void }) {
                         className="lr-music-row-meta"
                         style={overlayStyles.playlistOpen}
                         onClick={() => void openPlaylist(pl)}
-                        aria-label={`Open ${pl.title}`}>
+                        aria-label={`Open ${pl.title}`}
+                      >
                         <p className="lr-music-row-title">{pl.title}</p>
                         <p className="lr-music-row-sub">
                           {pl.creator}
@@ -853,7 +907,8 @@ function MusicSearchOverlay({ onClose }: { onClose: () => void }) {
                         <button
                           type="button"
                           className="lr-music-pill lr-music-pill--play"
-                          onClick={() => playPlaylist(pl)}>
+                          onClick={() => playPlaylist(pl)}
+                        >
                           Play All
                         </button>
                       </div>
@@ -909,14 +964,11 @@ export function MusicBar() {
   // The 4Hz progress clock lives HERE, in the bar subtree, not in the
   // orchestrator that owns the WS subscription — so playback re-renders only
   // the bar. Gated on barVisible so a suppressed/empty bar burns no interval.
-  // Must run before any early return to satisfy the Rules of Hooks.
   const displayPositionMs = useInterpolatedPosition(snapshot, barVisible)
 
-  // CSS-var height seam. ONE effect, declared before any early return, so the
-  // 0px-reset path is never split across the null-return branch below. It
-  // writes BAR_HEIGHT_PX when the bar is painting and 0px otherwise; the
-  // cleanup also resets to 0px on unmount so a mode switch can't strand a
-  // reserved gap.
+  // CSS-var height seam. It writes BAR_HEIGHT_PX when the bar is painting and
+  // 0px otherwise; the cleanup also resets to 0px on unmount so a mode switch
+  // can't strand a reserved gap.
   useEffect(() => {
     const root = document.documentElement
     root.style.setProperty(
@@ -936,20 +988,13 @@ export function MusicBar() {
     if (!slot) setSearchOpen(false)
   }, [slot])
 
-  // Null-return ONLY after the height effect has run, so the cleanup path is
-  // honoured. The search overlay is still rendered if open even when the bar
-  // itself isn't painting a track — but only while we still have a slot.
-  if (!barVisible) {
-    return slot && searchOpen ? (
-      <MusicSearchOverlay onClose={() => setSearchOpen(false)} />
-    ) : null
-  }
-
   const isPlaying = snapshot?.isPlaying ?? false
   const positionMs = displayPositionMs
   const durationMs = track?.durationMs ?? 0
   const progressPct =
-    durationMs > 0 ? Math.max(0, Math.min(100, (positionMs / durationMs) * 100)) : 0
+    durationMs > 0
+      ? Math.max(0, Math.min(100, (positionMs / durationMs) * 100))
+      : 0
 
   const sendControl = (name: ControlName, body?: Record<string, unknown>) => {
     void sendToBackground<unknown, ControlResp>({
@@ -958,82 +1003,101 @@ export function MusicBar() {
     }).catch(() => {})
   }
 
+  // The returned root is ALWAYS a Fragment whose SECOND child is the search
+  // overlay, so the overlay keeps a stable position/identity across every
+  // re-render of this instance. Conditionally returning a bare overlay from a
+  // `!barVisible` early-return would change the root element type
+  // (Fragment → MusicSearchOverlay), which React reconciles as a full
+  // unmount+remount — wiping the overlay's half-typed query and results. That
+  // is exactly the focus-loss-must-not-destroy-input invariant, and the bar's
+  // own paint state (a `track: null` snapshot between songs flips hasTrack, a
+  // transient suppression flips `suppressed`) must not tear the overlay down.
+  // So we gate ONLY the bar chrome on barVisible and render the overlay
+  // independently while a slot exists.
   return (
     <>
-      <div className="lr-music-bar" role="region" aria-label="Now playing">
-        <div className="lr-music-progress-track" aria-hidden="true">
-          <div
-            className="lr-music-progress-fill"
-            style={{ width: `${progressPct}%` }}
-          />
-        </div>
-
-        {track && track.artUrl ? (
-          <img className="lr-music-art" src={track.artUrl} alt="" />
-        ) : (
-          <div className="lr-music-art-empty">
-            <NoteIcon />
+      {barVisible && (
+        <div className="lr-music-bar" role="region" aria-label="Now playing">
+          <div className="lr-music-progress-track" aria-hidden="true">
+            <div
+              className="lr-music-progress-fill"
+              style={{ width: `${progressPct}%` }}
+            />
           </div>
-        )}
 
-        <div className="lr-music-meta">
-          <p className="lr-music-title">{track?.title}</p>
-          <p className="lr-music-artist">{track?.artists}</p>
+          {track && track.artUrl ? (
+            <img className="lr-music-art" src={track.artUrl} alt="" />
+          ) : (
+            <div className="lr-music-art-empty">
+              <NoteIcon />
+            </div>
+          )}
+
+          <div className="lr-music-meta">
+            <p className="lr-music-title">{track?.title}</p>
+            <p className="lr-music-artist">{track?.artists}</p>
+          </div>
+
+          <div style={barStyles.controls}>
+            <button
+              type="button"
+              className="lr-music-ctrl"
+              onClick={() => sendControl("musicPrev")}
+              aria-label="Previous track"
+            >
+              <PrevIcon />
+            </button>
+            <button
+              type="button"
+              className="lr-music-ctrl lr-music-ctrl--primary"
+              onClick={() =>
+                sendControl(isPlaying ? "musicPause" : "musicResume")
+              }
+              aria-label={isPlaying ? "Pause" : "Play"}
+            >
+              {isPlaying ? <PauseIcon /> : <PlayIcon />}
+            </button>
+            <button
+              type="button"
+              className="lr-music-ctrl"
+              onClick={() => sendControl("musicNext")}
+              aria-label="Next track"
+            >
+              <NextIcon />
+            </button>
+          </div>
+
+          <div style={barStyles.controls}>
+            <button
+              type="button"
+              className="lr-music-ctrl"
+              onClick={() => sendControl("musicVolume", { dir: "down" })}
+              aria-label="Volume down"
+            >
+              <VolDownIcon />
+            </button>
+            <button
+              type="button"
+              className="lr-music-ctrl"
+              onClick={() => sendControl("musicVolume", { dir: "up" })}
+              aria-label="Volume up"
+            >
+              <VolUpIcon />
+            </button>
+          </div>
+
+          <button
+            type="button"
+            className="lr-music-ctrl"
+            onClick={() => setSearchOpen(true)}
+            aria-label="Search music"
+          >
+            <SearchIcon />
+          </button>
         </div>
+      )}
 
-        <div style={barStyles.controls}>
-          <button
-            type="button"
-            className="lr-music-ctrl"
-            onClick={() => sendControl("musicPrev")}
-            aria-label="Previous track">
-            <PrevIcon />
-          </button>
-          <button
-            type="button"
-            className="lr-music-ctrl lr-music-ctrl--primary"
-            onClick={() =>
-              sendControl(isPlaying ? "musicPause" : "musicResume")
-            }
-            aria-label={isPlaying ? "Pause" : "Play"}>
-            {isPlaying ? <PauseIcon /> : <PlayIcon />}
-          </button>
-          <button
-            type="button"
-            className="lr-music-ctrl"
-            onClick={() => sendControl("musicNext")}
-            aria-label="Next track">
-            <NextIcon />
-          </button>
-        </div>
-
-        <div style={barStyles.controls}>
-          <button
-            type="button"
-            className="lr-music-ctrl"
-            onClick={() => sendControl("musicVolume", { dir: "down" })}
-            aria-label="Volume down">
-            <VolDownIcon />
-          </button>
-          <button
-            type="button"
-            className="lr-music-ctrl"
-            onClick={() => sendControl("musicVolume", { dir: "up" })}
-            aria-label="Volume up">
-            <VolUpIcon />
-          </button>
-        </div>
-
-        <button
-          type="button"
-          className="lr-music-ctrl"
-          onClick={() => setSearchOpen(true)}
-          aria-label="Search music">
-          <SearchIcon />
-        </button>
-      </div>
-
-      {searchOpen && (
+      {slot && searchOpen && (
         <MusicSearchOverlay onClose={() => setSearchOpen(false)} />
       )}
     </>

@@ -2,7 +2,7 @@ import type { PlasmoMessaging } from "@plasmohq/messaging"
 
 import { parseSongs } from "~lib/musicParse"
 
-const MIDDLEWARE_URL = process.env.PLASMO_PUBLIC_MIDDLEWARE_URL
+const MUSIC_URL = process.env.PLASMO_PUBLIC_MUSIC_URL
 const ROUTE_PATH = "/music/playlist-contents"
 
 // Fetch the songs inside a playlist so the user can drill in and enqueue/play
@@ -10,11 +10,11 @@ const ROUTE_PATH = "/music/playlist-contents"
 // strings end-to-end); returns the same normalised MusicSongResult[] shape as
 // song search via the shared parser so the results list renders identically.
 const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
-  if (!MIDDLEWARE_URL) {
+  if (!MUSIC_URL) {
     res.send({
       ok: false,
       error:
-        "Middleware URL not configured at build time. Rebuild with .env.{development,production} set."
+        "Music worker URL not configured at build time. Rebuild with .env.{development,production} set (PLASMO_PUBLIC_MUSIC_URL)."
     })
     return
   }
@@ -26,7 +26,7 @@ const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
     return
   }
 
-  const url = `${MIDDLEWARE_URL.replace(/\/+$/, "")}${ROUTE_PATH}`
+  const url = `${MUSIC_URL.replace(/\/+$/, "")}${ROUTE_PATH}`
   const headers: Record<string, string> = { "Content-Type": "application/json" }
   if (secret) headers["X-Extension-Token"] = secret
 

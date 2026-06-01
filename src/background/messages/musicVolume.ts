@@ -1,6 +1,6 @@
 import type { PlasmoMessaging } from "@plasmohq/messaging"
 
-const MIDDLEWARE_URL = process.env.PLASMO_PUBLIC_MIDDLEWARE_URL
+const MUSIC_URL = process.env.PLASMO_PUBLIC_MUSIC_URL
 const ROUTE_PATH = "/music/volume"
 
 // Volume nudge. The bar sends only a direction; the WORKER/dashboard own the
@@ -8,11 +8,11 @@ const ROUTE_PATH = "/music/volume"
 // readout. We post { dir } and let the worker compute the new level. `dir` is
 // validated to the two-value union so a typo can't reach the worker.
 const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
-  if (!MIDDLEWARE_URL) {
+  if (!MUSIC_URL) {
     res.send({
       ok: false,
       error:
-        "Middleware URL not configured at build time. Rebuild with .env.{development,production} set."
+        "Music worker URL not configured at build time. Rebuild with .env.{development,production} set (PLASMO_PUBLIC_MUSIC_URL)."
     })
     return
   }
@@ -24,7 +24,7 @@ const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
     return
   }
 
-  const url = `${MIDDLEWARE_URL.replace(/\/+$/, "")}${ROUTE_PATH}`
+  const url = `${MUSIC_URL.replace(/\/+$/, "")}${ROUTE_PATH}`
   const headers: Record<string, string> = { "Content-Type": "application/json" }
   if (secret) headers["X-Extension-Token"] = secret
 
