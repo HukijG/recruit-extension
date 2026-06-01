@@ -7,6 +7,16 @@ const ROUTE_PATH = "/music/volume"
 // contract puts the +/-10 delta on the EXTENSION side ("Volume buttons send
 // +/-10 percent-point deltas"), so the wire body is the signed delta, not a
 // bare direction — the worker applies it verbatim.
+//
+// CROSS-REPO ITEM TO CONFIRM (do NOT flip unilaterally): the frozen contract
+// here ships { delta }, but the dashboard's /api/remote/volume route is
+// documented to deserialize VolumeBody { dir: "up" | "down" } and compute the
+// step server-side, with the worker forwarding the body verbatim. As written,
+// { delta } would hit a {dir}-expecting deserializer and 400/422 — silently
+// killing volume end-to-end. The frozen contract wins for THIS repo, so the
+// code stays as { delta }; the worker+dashboard side must be confirmed to
+// accept { delta } (or the worker must translate {dir} <-> {delta}). This is
+// the single highest-risk integration seam — escalated, not resolved in-repo.
 const VOLUME_STEP_PP = 10
 
 // Volume nudge. The bar sends a direction; the handler maps it to the signed
