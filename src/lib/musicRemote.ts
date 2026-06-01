@@ -1,5 +1,9 @@
+import { sendToBackground } from "@plasmohq/messaging"
 import { useCallback, useEffect, useRef, useState } from "react"
 
+import { useStorage } from "@plasmohq/storage/hook"
+
+import { localStore } from "~lib/constants"
 import type {
   MusicWsStatus,
   NowPlayingSnapshot,
@@ -14,28 +18,16 @@ import type {
 // Hoisting the clock here would re-render every mode subtree at 4Hz during
 // playback, defeating the bar's "self-contained" mandate.
 //
-// WS AUTH — OPEN CONTRACT GAP, ESCALATED (do NOT treat as resolved):
-//   The frozen contract says now-playing rides the worker's DO WS route using
-//   "existing auth (X-Extension-Token / Access JWT)". But a browser WebSocket
-//   CANNOT set a custom request header, so neither named scheme can be carried
-//   on the handshake, and a token in the wss:// query would leak into
-//   Cloudflare / worker / proxy / devtools logs. The contract-faithful
-//   resolutions (a short-lived ticket minted via an authed HTTP call then
-//   passed as a one-time path segment or subprotocol; OR the worker accepting
-//   the Access cookie, documented in the contract) BOTH require a worker-side
-//   contract decision — and the worker's /music WS route does not exist yet,
-//   so neither can be implemented or verified here. We do NOT unilaterally
-//   invent a ticket endpoint or pin cookie-auth as the answer.
-//
-//   As-is behaviour (the only thing a browser WS can do without a worker
-//   contract): open the handshake with no token in the URL. If the worker
-//   origin is behind Cloudflare Access, the browser attaches the same-origin
-//   Access cookie automatically and the upgrade may authenticate; if not (a
-//   legacy X-Extension-Token-only user, or a worker that authenticates the
-//   upgrade on a header), the handshake fails and the hook sits in
-//   error/backoff. The legacy X-Extension-Token-only path has NO working WS
-//   auth until the worker contract names a header-free scheme. This is an
-//   escalation, not a shipped decision.
+// WS AUTH — TICKET FLOW (header-free):
+//   A browser WebSocket can't set request headers, so the WS can't carry the
+//   normal X-Extension-Token. Instead we mint a single-use ticket over the
+//   authed HTTP path: each connect first calls the musicWsTicket background
+//   handler (which POSTs /music/ws-ticket with the extension secret), then
+//   opens the WS with subprotocols ['rf-music.v1', 'ticket.' + ticket]. The
+//   worker redeems the ticket from the Sec-WebSocket-Protocol header before
+//   accepting the upgrade and echoes back 'rf-music.v1'. A failed ticket fetch
+//   is treated exactly like a dropped connection — we never open a WS without a
+//   ticket — and rides the same backoff/reconnect path below.
 //
 // CONNECT GATING (demand-gate):
 //   The socket opens whenever the side panel is OPEN, on every surface except
@@ -55,6 +47,11 @@ const MUSIC_URL = process.env.PLASMO_PUBLIC_MUSIC_URL
 // the frozen contract's "now-playing via the worker's DO WS route".
 const WS_PATH = "/music/now-playing"
 
+// Application subprotocol the worker echoes back on a successful upgrade. The
+// ticket rides as a SECOND subprotocol (`ticket.<id>`) alongside it; the worker
+// redeems the ticket and selects this one as the negotiated protocol.
+const WS_SUBPROTOCOL = "rf-music.v1"
+
 // Interpolation tick. 250ms is smooth enough for a thin progress bar without
 // burning a frame budget; the underlying clock is performance.now() so the
 // displayed position is monotonic and immune to wall-clock jumps.
@@ -64,6 +61,14 @@ const TICK_MS = 250
 // doesn't hammer the edge but recovery is still prompt once it returns.
 const BACKOFF_BASE_MS = 1_000
 const BACKOFF_CAP_MS = 15_000
+
+// Response envelope from the musicWsTicket background handler: a minted ticket
+// id on success, or an error string. `ticket` is only present when ok.
+interface WsTicketResp {
+  ok: boolean
+  ticket?: string
+  error?: string
+}
 
 export interface UseMusicRemoteReturn {
   // The latest RAW snapshot as streamed (isPlaying + the track + the
@@ -174,6 +179,20 @@ export function useMusicRemote(enabled: boolean): UseMusicRemoteReturn {
   // the latest connect through this ref, kept current by an effect below.
   const connectRef = useRef<() => void>(() => {})
 
+  // The extension secret authenticates the ws-ticket mint (the WS itself can't
+  // carry a header). Mirrored through a ref so the recursive reconnect closures
+  // always read the freshest value without re-subscribing the WS lifecycle to
+  // it — a secret change shouldn't tear down a live socket, only the next
+  // ticket fetch needs to see it.
+  const [extensionSecret] = useStorage<string>(
+    { key: "extensionSecret", instance: localStore },
+    ""
+  )
+  const secretRef = useRef(extensionSecret)
+  useEffect(() => {
+    secretRef.current = extensionSecret
+  }, [extensionSecret])
+
   const clearReconnect = useCallback(() => {
     if (reconnectRef.current) {
       clearTimeout(reconnectRef.current)
@@ -210,6 +229,56 @@ export function useMusicRemote(enabled: boolean): UseMusicRemoteReturn {
     }, delay)
   }, [clearReconnect])
 
+  // Attach the lifecycle handlers to a freshly-opened socket. Split out of
+  // connect() so the async ticket→open flow keeps the same handler wiring.
+  const wireSocket = useCallback(
+    (ws: WebSocket) => {
+      ws.onopen = () => {
+        // Stay "connecting" until the first snapshot arrives — an open socket
+        // with no data yet isn't usefully "open" for the bar. Backoff is NOT
+        // reset here: a worker that accepts the upgrade then immediately closes
+        // (e.g. a post-handshake rejection — possible if the redeemed ticket is
+        // already spent/expired) would otherwise reset to the 1s floor on every
+        // bare open and hammer the edge in a tight reconnect loop. The reset
+        // rides the FIRST valid snapshot instead, which is the only signal that
+        // the connection is actually useful.
+      }
+
+      ws.onmessage = (event) => {
+        let parsed: unknown
+        try {
+          parsed = JSON.parse(typeof event.data === "string" ? event.data : "")
+        } catch {
+          return
+        }
+        const snap = parseSnapshot(parsed)
+        if (!snap) return
+        // First useful frame: this is a real, working connection, so collapse
+        // backoff to the floor for the NEXT drop. Idempotent on later frames.
+        backoffRef.current = BACKOFF_BASE_MS
+        setStatus("open")
+        setSnapshot(snap)
+      }
+
+      ws.onerror = () => {
+        // onerror is always followed by onclose; let onclose own the reconnect
+        // so we don't double-schedule.
+        setStatus("error")
+      }
+
+      ws.onclose = () => {
+        wsRef.current = null
+        if (!activeRef.current) {
+          setStatus("closed")
+          return
+        }
+        setStatus("error")
+        scheduleReconnect()
+      }
+    },
+    [scheduleReconnect]
+  )
+
   const connect = useCallback(() => {
     if (!activeRef.current) return
     const url = buildWsUrl()
@@ -221,60 +290,45 @@ export function useMusicRemote(enabled: boolean): UseMusicRemoteReturn {
     teardownSocket()
     setStatus("connecting")
 
-    let ws: WebSocket
-    try {
-      ws = new WebSocket(url)
-    } catch {
-      // Construction itself can throw on a malformed URL / CSP block. Treat
-      // as a drop and schedule a backoff reconnect.
-      scheduleReconnect()
-      return
-    }
-    wsRef.current = ws
-
-    ws.onopen = () => {
-      // Stay "connecting" until the first snapshot arrives — an open socket
-      // with no data yet isn't usefully "open" for the bar. Backoff is NOT
-      // reset here: a worker that accepts the upgrade then immediately closes
-      // (e.g. post-handshake auth rejection — a live risk while the WS auth
-      // scheme is unresolved, see the header note above) would otherwise reset
-      // to the 1s floor on every bare open and hammer the edge in a tight
-      // reconnect loop. The reset rides the FIRST valid snapshot instead, which
-      // is the only signal that the connection is actually useful.
-    }
-
-    ws.onmessage = (event) => {
-      let parsed: unknown
+    // Mint a single-use ticket over the authed HTTP path, THEN open the WS with
+    // it as a subprotocol — a browser WS can't send the X-Extension-Token
+    // header. A failed ticket fetch is a connection failure: route it through
+    // the same backoff/reconnect path and never open a header-less WS.
+    void (async () => {
+      let ticket: string
       try {
-        parsed = JSON.parse(typeof event.data === "string" ? event.data : "")
+        const resp = await sendToBackground<unknown, WsTicketResp>({
+          name: "musicWsTicket",
+          body: { secret: secretRef.current }
+        })
+        if (!resp?.ok || !resp.ticket) {
+          if (activeRef.current) scheduleReconnect()
+          return
+        }
+        ticket = resp.ticket
       } catch {
+        if (activeRef.current) scheduleReconnect()
         return
       }
-      const snap = parseSnapshot(parsed)
-      if (!snap) return
-      // First useful frame: this is a real, working connection, so collapse
-      // backoff to the floor for the NEXT drop. Idempotent on later frames.
-      backoffRef.current = BACKOFF_BASE_MS
-      setStatus("open")
-      setSnapshot(snap)
-    }
 
-    ws.onerror = () => {
-      // onerror is always followed by onclose; let onclose own the reconnect
-      // so we don't double-schedule.
-      setStatus("error")
-    }
+      // The hook may have been disabled while the ticket was in flight; bail
+      // without opening so we don't leave a stray socket past teardown.
+      if (!activeRef.current) return
 
-    ws.onclose = () => {
-      wsRef.current = null
-      if (!activeRef.current) {
-        setStatus("closed")
+      let ws: WebSocket
+      try {
+        ws = new WebSocket(url, [WS_SUBPROTOCOL, `ticket.${ticket}`])
+      } catch {
+        // Construction itself can throw on a malformed URL / CSP block. Treat
+        // as a drop and schedule a backoff reconnect.
+        scheduleReconnect()
         return
       }
-      setStatus("error")
-      scheduleReconnect()
-    }
-  }, [teardownSocket, scheduleReconnect])
+      wsRef.current = ws
+
+      wireSocket(ws)
+    })()
+  }, [teardownSocket, scheduleReconnect, wireSocket])
 
   // Keep connectRef pointing at the freshest connect closure so the
   // reconnect timer (scheduled via scheduleReconnect) always re-opens with
