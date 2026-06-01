@@ -37,10 +37,14 @@ import type {
 //   auth until the worker contract names a header-free scheme. This is an
 //   escalation, not a shipped decision.
 //
-// CONNECT GATING:
-//   The socket only opens while the side panel is in candidate mode (the one
-//   mode that mounts the MusicRemoteContext provider). The hook takes an
-//   `enabled` flag; flipping it false closes the socket and cancels backoff.
+// CONNECT GATING (demand-gate):
+//   The socket opens whenever the side panel is OPEN, on every surface except
+//   the template editor — i.e. all three modes. The bar's WS is the system's
+//   demand-gate: the worker's upstream DO socket lives exactly while someone
+//   has the panel open, so we do NOT scope the connection to a single mode
+//   (doing so would collapse the gate to "a recruiter is viewing one specific
+//   candidate"). The hook takes an `enabled` flag (panel-open); flipping it
+//   false closes the socket and cancels backoff.
 
 // The now-playing WS rides the NEW, DEDICATED music worker (separate from the
 // Recruiterflow/Dialpad middleware), per the frozen cross-repo contract. Both
@@ -273,9 +277,10 @@ export function useMusicRemote(enabled: boolean): UseMusicRemoteReturn {
     connectRef.current = connect
   }, [connect])
 
-  // Open the socket only while enabled (candidate mode). Disabling closes it
-  // and cancels any pending reconnect; the snapshot is cleared so a re-entry
-  // doesn't flash a stale track before the first fresh frame.
+  // Open the socket only while enabled (panel-open, any non-editor mode).
+  // Disabling closes it and cancels any pending reconnect; the snapshot is
+  // cleared so a re-entry doesn't flash a stale track before the first fresh
+  // frame.
   useEffect(() => {
     if (!enabled) {
       activeRef.current = false

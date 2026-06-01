@@ -271,16 +271,16 @@ export interface NowPlayingSnapshot {
 // awaiting backoff reconnect.
 export type MusicWsStatus = "idle" | "connecting" | "open" | "closed" | "error"
 
-// A single Deezer search hit. The id is the canonical Deezer track id — a
-// STRING on the dashboard wire (`SearchResult.id: String`, and the dashboard's
-// own `enqueueSong(id: string)`), because Deezer ids can exceed 2^53 and
-// numeric coercion is lossy. Song actions (enqueue / play) post the
-// dashboard's `{ id: <string> }` payload verbatim.
+// A single Deezer search hit. The id is the canonical Deezer track id, held
+// here as a STRING for stable React-key identity and tolerant parsing (the
+// search/contents wire may emit it as a JSON number or string — parseSongs
+// normalises either to a string). This is purely the in-extension carrier
+// shape; it is NOT the action wire shape.
 //
-// NB: the frozen contract handed to this work says "Deezer ids numeric"; the
-// dashboard's catalogue + lib/songs.ts make them strings end-to-end. We
-// implement against reality (string) so rows actually parse; the contradiction
-// is recorded as an escalation.
+// WIRE (frozen contract): "Deezer ids numeric; song actions mirror {id}
+// payloads." Song actions (enqueue / play) therefore post a JSON NUMBER —
+// coerceTrackId narrows this string back to a number in the musicPlay /
+// musicEnqueue handlers so `songs::{play,enqueue}` (serde `id: u64`) accept it.
 export interface MusicSongResult {
   id: string
   title: string
@@ -292,8 +292,10 @@ export interface MusicSongResult {
   durationMs: number
 }
 
-// A single playlist search hit. Playlist actions post `{ id: <string> }`; the
-// id is a string for the same reason as song ids above.
+// A single playlist search hit. The id is held as a string for the same
+// identity/parsing reason as song ids above; the playlist-play action posts the
+// NUMERIC `{ id }` the frozen contract specifies (coerced in musicPlaylistPlay,
+// matching `playlists::play`'s serde `id: u64`).
 export interface MusicPlaylistResult {
   id: string
   title: string

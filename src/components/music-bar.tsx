@@ -862,16 +862,24 @@ function MusicSearchOverlay({ onClose }: { onClose: () => void }) {
         {error && <p style={overlayStyles.error}>{error}</p>}
 
         <div style={overlayStyles.results}>
-          {drill
+          {searching && (
+            // Explicit pane-level feedback. The submit button shows "…" too,
+            // but a playlist drill-in hides that button entirely, so without
+            // this the results pane is a blank void while a fetch is in flight.
+            <p style={overlayStyles.empty}>Searching…</p>
+          )}
+          {searching
+            ? null
+            : drill
             ? drill.songs.length > 0
               ? drill.songs.map(renderSongRow)
-              : !searching && (
+              : (
                   <p style={overlayStyles.empty}>This playlist is empty.</p>
                 )
             : tab === "songs"
               ? songResults.length > 0
                 ? songResults.map(renderSongRow)
-                : !searching && (
+                : (
                     <p style={overlayStyles.empty}>
                       Search for a song to play or queue it.
                     </p>
@@ -888,11 +896,23 @@ function MusicSearchOverlay({ onClose }: { onClose: () => void }) {
                       ) : (
                         <div className="lr-music-row-art" />
                       )}
-                      <button
-                        type="button"
+                      {/* role="button" (not a real <button>) because the meta
+                          carries block <p> children — flow content that's
+                          invalid inside a <button>'s phrasing-only model. A
+                          div + Enter/Space keyboard activation keeps it
+                          clickable and accessible without the nesting violation. */}
+                      <div
                         className="lr-music-row-meta"
+                        role="button"
+                        tabIndex={0}
                         style={overlayStyles.playlistOpen}
                         onClick={() => void openPlaylist(pl)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault()
+                            void openPlaylist(pl)
+                          }
+                        }}
                         aria-label={`Open ${pl.title}`}
                       >
                         <p className="lr-music-row-title">{pl.title}</p>
@@ -902,7 +922,7 @@ function MusicSearchOverlay({ onClose }: { onClose: () => void }) {
                             ? ` · ${pl.trackCount} track${pl.trackCount === 1 ? "" : "s"}`
                             : ""}
                         </p>
-                      </button>
+                      </div>
                       <div className="lr-music-row-actions">
                         <button
                           type="button"
@@ -914,7 +934,7 @@ function MusicSearchOverlay({ onClose }: { onClose: () => void }) {
                       </div>
                     </div>
                   ))
-                : !searching && (
+                : (
                     <p style={overlayStyles.empty}>
                       Search for a playlist to play it.
                     </p>
@@ -952,6 +972,7 @@ export function MusicBar() {
   const [searchOpen, setSearchOpen] = useState(false)
 
   const snapshot = slot?.snapshot ?? null
+  const status = slot?.status ?? "idle"
   const suppressed = slot?.suppressed ?? false
   const track = snapshot?.track ?? null
   const hasTrack = !!track
@@ -963,8 +984,16 @@ export function MusicBar() {
 
   // The 4Hz progress clock lives HERE, in the bar subtree, not in the
   // orchestrator that owns the WS subscription — so playback re-renders only
-  // the bar. Gated on barVisible so a suppressed/empty bar burns no interval.
-  const displayPositionMs = useInterpolatedPosition(snapshot, barVisible)
+  // the bar. Gated on barVisible so a suppressed/empty bar burns no interval,
+  // AND on a live (`open`) socket: a dropped connection retains the last
+  // snapshot, so without this gate the tick would keep advancing the progress
+  // fill past reality during an outage/backoff. Freezing at the last anchor
+  // until a fresh frame re-anchors is the honest display when the stream is
+  // stale. (Pause already freezes via the anchor's isPlaying flag.)
+  const displayPositionMs = useInterpolatedPosition(
+    snapshot,
+    barVisible && status === "open"
+  )
 
   // CSS-var height seam. It writes BAR_HEIGHT_PX when the bar is painting and
   // 0px otherwise; the cleanup also resets to 0px on unmount so a mode switch
@@ -981,8 +1010,10 @@ export function MusicBar() {
   }, [barVisible])
 
   // If the bar stops painting while the overlay is open, the overlay is a
-  // standalone fixed layer (z above the bar) and can stay — but a slot-loss
-  // (left candidate mode entirely) should drop it, since there's no music
+  // standalone fixed layer (z above the bar) and can stay — it persists across
+  // mode switches now that the bar is cross-mode chrome (the slot is present on
+  // every non-editor surface). A genuine slot-loss (no provider at all — e.g. a
+  // future template-editor surface) still drops it, since there's no music
   // surface to return to.
   useEffect(() => {
     if (!slot) setSearchOpen(false)
@@ -1168,12 +1199,10 @@ const overlayStyles: Record<string, React.CSSProperties> = {
     color: "#5f6368",
     lineHeight: 1.4
   },
+  // Applied to the playlist row's drill-in target (a div role="button"). Just
+  // the pointer affordance + top-aligned text; .lr-music-row-meta supplies the
+  // flex column layout.
   playlistOpen: {
-    background: "transparent",
-    border: "none",
-    padding: 0,
-    margin: 0,
-    textAlign: "left",
     cursor: "pointer",
     alignItems: "flex-start"
   }

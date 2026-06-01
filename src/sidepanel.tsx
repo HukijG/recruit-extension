@@ -662,10 +662,16 @@ function SidePanel() {
 
   // --- Now-playing music bar ---
   //
-  // The bar is base-page chrome (mounted below, like global CSS), but only
-  // streams in candidate mode — the one mode that provides MusicRemoteContext.
-  // The socket itself is gated on `mode === "candidate"` inside the hook.
-  const music = useMusicRemote(mode === "candidate")
+  // The bar is persistent base-page chrome (mounted below, like global CSS) on
+  // every panel surface EXCEPT the template editor — i.e. all three modes
+  // (sync / candidate / test_call). Its WS is the system's demand-gate: the
+  // worker's upstream DO socket lives exactly while someone has the panel open,
+  // so the socket runs whenever the panel is mounted (enabled = true here) and
+  // is suppressed — not torn down — only while the full-bleed template manager
+  // overlay covers the panel (via `suppressed` below). Gating it to a single
+  // mode would collapse the demand-gate to "a recruiter is viewing a specific
+  // candidate", which is not the intended lifecycle.
+  const music = useMusicRemote(true)
 
   // Suppress the bar's chrome whenever a higher overlay covers the panel. The
   // dimmed-backdrop popovers (settings, text composer) AND the opaque
@@ -678,11 +684,14 @@ function SidePanel() {
     textPopoverOpen || settingsOpen || managerOpen || showJobModal
 
   // Reserve bottom padding for the fixed bar so the last row never hides
-  // behind it. When the bar is actually painting (candidate mode, not
-  // suppressed), reserve its height PLUS the standard bottom inset (keeping
-  // air above the bar). Otherwise just the inset, which replaces the
-  // container padding shorthand's bottom value rather than stacking on it.
-  const barReserved = mode === "candidate" && !sidepanelOverlayOpen
+  // behind it. When the bar is eligible to paint (any mode, not suppressed by a
+  // higher overlay), reserve its height PLUS the standard bottom inset (keeping
+  // air above the bar). The bar self-hides with no track, in which case it
+  // writes --lr-music-bar-height: 0px and the calc() collapses to just the
+  // inset — so reserving here is safe even when nothing is playing. Otherwise
+  // just the inset, which replaces the container padding shorthand's bottom
+  // value rather than stacking on it.
+  const barReserved = !sidepanelOverlayOpen
   const containerPaddingBottom = barReserved
     ? `calc(${CONTAINER_BOTTOM_INSET}px + var(--lr-music-bar-height, 0px))`
     : `${CONTAINER_BOTTOM_INSET}px`
@@ -940,19 +949,18 @@ function SidePanel() {
     <CallStatsRefreshContext.Provider value={callStats.refresh}>
     <MusicRemoteContext.Provider
       value={
-        // Mode-gate the slot like the sibling cross-mode contexts
-        // (CallStreamContext / TextSlotContext): ONLY candidate mode supplies
-        // it. Other modes get the default `null` so the bar self-hides via the
-        // absent slot — not merely an absent snapshot — and the bar's
-        // `if (!slot) setSearchOpen(false)` cleanup fires on mode exit, closing
-        // any open search overlay instead of stranding it over sync/test_call.
-        mode === "candidate"
-          ? {
-              snapshot: music.snapshot,
-              status: music.status,
-              suppressed: sidepanelOverlayOpen
-            }
-          : null
+        // The bar is persistent chrome on every surface except the template
+        // editor, so the slot is supplied in ALL three modes (sync / candidate
+        // / test_call) — NOT gated to candidate like the candidate-only slots
+        // (CallStreamContext / TextSlotContext). The bar self-hides when there's
+        // no track (absent snapshot) and self-suppresses behind a higher overlay
+        // via `suppressed`, so this is data-only and behaviour-preserving for
+        // sync/test_call (nothing paints until music is actually playing).
+        {
+          snapshot: music.snapshot,
+          status: music.status,
+          suppressed: sidepanelOverlayOpen
+        }
       }>
     <div style={{ ...styles.container, paddingBottom: containerPaddingBottom }}>
       <HeaderBar

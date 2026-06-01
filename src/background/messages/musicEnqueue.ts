@@ -1,13 +1,15 @@
 import type { PlasmoMessaging } from "@plasmohq/messaging"
 
+import { coerceTrackId } from "~lib/musicParse"
+
 const MUSIC_URL = process.env.PLASMO_PUBLIC_MUSIC_URL
 const ROUTE_PATH = "/music/enqueue"
 
-// Add a song to the queue. Mirrors the dashboard's { id } payload; the id is a
-// STRING Deezer id (the dashboard's IdBody { id: String } and enqueueSong(id:
-// string)), guarded so an empty/non-string id can't reach the worker.
-// Fire-and-forget — the queue change surfaces through the now-playing WS
-// stream, not this response.
+// Add a song to the queue. Posts the frozen contract's NUMERIC { id } payload
+// (`songs::enqueue` deserializes `id: u64`). The bar carries the id as a string
+// (stable React key / tolerant parse); coerceTrackId narrows it to a JSON
+// number here. Fire-and-forget — the queue change surfaces through the
+// now-playing WS stream, not this response.
 const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
   if (!MUSIC_URL) {
     res.send({
@@ -18,10 +20,11 @@ const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
     return
   }
 
-  const { id, secret } = req.body ?? {}
+  const id = coerceTrackId((req.body ?? {}).id)
+  const { secret } = req.body ?? {}
 
-  if (typeof id !== "string" || !id) {
-    res.send({ ok: false, error: "Missing song id" })
+  if (id === null) {
+    res.send({ ok: false, error: "Missing or invalid song id" })
     return
   }
 

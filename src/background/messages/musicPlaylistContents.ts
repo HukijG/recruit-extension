@@ -1,13 +1,14 @@
 import type { PlasmoMessaging } from "@plasmohq/messaging"
 
-import { parseSongs } from "~lib/musicParse"
+import { coerceTrackId, parseSongs } from "~lib/musicParse"
 
 const MUSIC_URL = process.env.PLASMO_PUBLIC_MUSIC_URL
 const ROUTE_PATH = "/music/playlist-contents"
 
 // Fetch the songs inside a playlist so the user can drill in and enqueue/play
-// individual tracks. Body carries the string playlist id (Deezer ids are
-// strings end-to-end); returns the same normalised MusicSongResult[] shape as
+// individual tracks. Posts the frozen contract's NUMERIC { id } (same id-shape
+// as the playlist-play action — coerced via coerceTrackId from the bar's
+// string-carried id); returns the same normalised MusicSongResult[] shape as
 // song search via the shared parser so the results list renders identically.
 const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
   if (!MUSIC_URL) {
@@ -19,10 +20,11 @@ const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
     return
   }
 
-  const { id, secret } = req.body ?? {}
+  const id = coerceTrackId((req.body ?? {}).id)
+  const { secret } = req.body ?? {}
 
-  if (typeof id !== "string" || !id) {
-    res.send({ ok: false, error: "Missing playlist id" })
+  if (id === null) {
+    res.send({ ok: false, error: "Missing or invalid playlist id" })
     return
   }
 

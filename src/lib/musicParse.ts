@@ -9,12 +9,17 @@ import type { MusicPlaylistResult, MusicSongResult } from "~lib/types"
 // a Paged envelope `{ items, total, offset, limit }` whose rows use serde
 // field names that differ from the bar's stored shape — songs carry
 // `track`/`artist`/`coverUrl`, playlists carry `name`/`ownerName`/`coverUrl`,
-// ids are STRINGS, cover/duration are nullable. The frozen contract names the
-// bar-side fields `title`/`artists`/`artUrl`. The worker is a pass-through
-// proxy, so we accept BOTH the dashboard field names and the contract names,
-// unwrap the Paged envelope, and normalise nullable/array fields — otherwise
-// every real row is dropped at the type guard. See the "ids numeric" /
-// artists-array / Paged escalations.
+// cover/duration are nullable. The frozen contract names the bar-side fields
+// `title`/`artists`/`artUrl`. The worker is a pass-through proxy, so we accept
+// BOTH the dashboard field names and the contract names, unwrap the Paged
+// envelope, and normalise nullable/array fields — otherwise every real row is
+// dropped at the type guard.
+//
+// IDS: the frozen contract says Deezer ids are numeric. Search/contents PARSING
+// stays tolerant (pickId accepts a JSON number OR string and carries a string
+// for stable React identity); the OUTBOUND action payloads are the strict half
+// — coerceTrackId narrows the carried id back to the contract's JSON NUMBER
+// before play/enqueue/playlist-play post it.
 
 // Unwrap a list from either a bare array, the dashboard's `{ items: [...] }`
 // Paged envelope, or a legacy `{ results: [...] }` wrapper (defensive
@@ -49,12 +54,35 @@ function pickArtUrl(r: Record<string, unknown>, ...keys: string[]): string | nul
   return ""
 }
 
-// The catalogue id is a STRING end-to-end (Deezer ids can exceed 2^53). Accept
-// a JSON number too and stringify it, in case an upstream emits a numeric id.
+// Parsed-row ids are kept as STRINGS in the bar (stable React key; tolerant of
+// a numeric- or string-shaped wire). Accept a JSON number too and stringify it,
+// in case an upstream emits a numeric id.
 function pickId(r: Record<string, unknown>): string | null {
   const v = r.id
   if (typeof v === "string" && v.length > 0) return v
   if (typeof v === "number" && Number.isFinite(v)) return String(v)
+  return null
+}
+
+// Coerce a bar-side string id (or an already-numeric id off the message bus)
+// down to the JSON NUMBER the frozen contract puts on the wire for song /
+// playlist actions (`songs::{play,enqueue}` / `playlists::play` deserialize
+// `id: u64`). Deezer track/playlist ids are integers that fit in a u64; we
+// reject anything non-integer, non-finite, or negative so a malformed id can't
+// reach the worker as a string (which serde u64 would refuse). Returns null on
+// any invalid input so the caller can surface "invalid id" instead of posting.
+export function coerceTrackId(raw: unknown): number | null {
+  if (typeof raw === "number") {
+    return Number.isInteger(raw) && raw >= 0 ? raw : null
+  }
+  if (typeof raw === "string") {
+    const trimmed = raw.trim()
+    // Strict integer string only — Number("") is 0 and Number("12x") is NaN,
+    // so guard the shape before coercing to avoid silently accepting junk.
+    if (!/^\d+$/.test(trimmed)) return null
+    const n = Number(trimmed)
+    return Number.isInteger(n) && n >= 0 ? n : null
+  }
   return null
 }
 

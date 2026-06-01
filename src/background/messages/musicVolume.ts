@@ -3,10 +3,16 @@ import type { PlasmoMessaging } from "@plasmohq/messaging"
 const MUSIC_URL = process.env.PLASMO_PUBLIC_MUSIC_URL
 const ROUTE_PATH = "/music/volume"
 
-// Volume nudge. The bar sends only a direction; the WORKER/dashboard own the
-// +/-10 percent-point math (frozen contract), and the bar shows NO volume
-// readout. We post { dir } and let the worker compute the new level. `dir` is
-// validated to the two-value union so a typo can't reach the worker.
+// Per-press volume nudge magnitude in percent points. The frozen cross-repo
+// contract puts the +/-10 delta on the EXTENSION side ("Volume buttons send
+// +/-10 percent-point deltas"), so the wire body is the signed delta, not a
+// bare direction — the worker applies it verbatim.
+const VOLUME_STEP_PP = 10
+
+// Volume nudge. The bar sends a direction; the handler maps it to the signed
+// +/-10 percent-point delta the frozen contract specifies and posts { delta }.
+// The bar shows NO volume readout. `dir` is validated to the two-value union so
+// a typo can't reach the worker.
 const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
   if (!MUSIC_URL) {
     res.send({
@@ -24,6 +30,8 @@ const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
     return
   }
 
+  const delta = dir === "up" ? VOLUME_STEP_PP : -VOLUME_STEP_PP
+
   const url = `${MUSIC_URL.replace(/\/+$/, "")}${ROUTE_PATH}`
   const headers: Record<string, string> = { "Content-Type": "application/json" }
   if (secret) headers["X-Extension-Token"] = secret
@@ -32,7 +40,7 @@ const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
     const resp = await fetch(url, {
       method: "POST",
       headers,
-      body: JSON.stringify({ dir })
+      body: JSON.stringify({ delta })
     })
     if (!resp.ok) {
       res.send({ ok: false, error: `${resp.status} ${resp.statusText}` })
