@@ -696,6 +696,19 @@ function SidePanel() {
     ? `calc(${CONTAINER_BOTTOM_INSET}px + var(--lr-music-bar-height, 0px))`
     : `${CONTAINER_BOTTOM_INSET}px`
 
+  // Memoised like callStreamSlot above so the context value keeps a stable
+  // identity between sidepanel re-renders — the bar (a useContext consumer)
+  // then re-renders only when the snapshot, status, or suppression actually
+  // changes, not on every orchestrator render.
+  const musicSlot = useMemo(
+    () => ({
+      snapshot: music.snapshot,
+      status: music.status,
+      suppressed: sidepanelOverlayOpen
+    }),
+    [music.snapshot, music.status, sidepanelOverlayOpen]
+  )
+
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [errorToast, setErrorToast] = useState<string | null>(null)
 
@@ -947,21 +960,14 @@ function SidePanel() {
 
   return (
     <CallStatsRefreshContext.Provider value={callStats.refresh}>
-    <MusicRemoteContext.Provider
-      value={
-        // The bar is persistent chrome on every surface except the template
-        // editor, so the slot is supplied in ALL three modes (sync / candidate
-        // / test_call) — NOT gated to candidate like the candidate-only slots
-        // (CallStreamContext / TextSlotContext). The bar self-hides when there's
-        // no track (absent snapshot) and self-suppresses behind a higher overlay
-        // via `suppressed`, so this is data-only and behaviour-preserving for
-        // sync/test_call (nothing paints until music is actually playing).
-        {
-          snapshot: music.snapshot,
-          status: music.status,
-          suppressed: sidepanelOverlayOpen
-        }
-      }>
+    {/* The bar is persistent chrome on every surface except the template
+        editor, so the slot is supplied in ALL three modes (sync / candidate /
+        test_call) — NOT gated to candidate like the candidate-only slots
+        (CallStreamContext / TextSlotContext). The bar self-hides when there's
+        no track (absent snapshot) and self-suppresses behind a higher overlay
+        via `suppressed`, so this is data-only and behaviour-preserving for
+        sync/test_call (nothing paints until music is actually playing). */}
+    <MusicRemoteContext.Provider value={musicSlot}>
     <div style={{ ...styles.container, paddingBottom: containerPaddingBottom }}>
       <HeaderBar
         daily={callStats.daily}
@@ -1164,9 +1170,10 @@ function SidePanel() {
       )}
       {/* Base-page chrome: rendered LAST so it's the final child of the
           container, sitting below the dimmed-backdrop popovers by z-order and
-          above the candidate toasts via --lr-music-bar-height. The bar
-          self-hides outside candidate mode (no slot) and self-suppresses when
-          `suppressed` is set. */}
+          above the candidate toasts via --lr-music-bar-height. The slot is
+          supplied in ALL three modes (the Provider wraps the whole tree, not a
+          single mode), so the bar self-hides only when there's no track or it's
+          suppressed by a higher overlay — never on mode. */}
       <MusicBar />
     </div>
     </MusicRemoteContext.Provider>

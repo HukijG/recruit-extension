@@ -241,8 +241,11 @@ export type TemplateVariable = "firstName"
 
 export interface NowPlayingTrack {
   // u64 on the dashboard wire (relay protocol `load_id`), serialised as a JSON
-  // NUMBER. The reanchor() reset compares this on equality, so it stays the
-  // raw number rather than a coerced string.
+  // NUMBER — the CHANGE KEY for a new-track reset. useInterpolatedPosition
+  // re-anchors on each snapshot's positionMs directly (a new track arrives with
+  // a fresh loadId and positionMs ~0, which hard-resets the fill), so it isn't
+  // compared by hand here; kept as the raw number for a clean wire-identity
+  // match rather than a coerced string.
   loadId: number
   title: string
   // The dashboard's TrackMetadata carries `artists: Vec<String>` (a JSON

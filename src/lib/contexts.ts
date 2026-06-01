@@ -23,6 +23,9 @@ export const CallStatsRefreshContext = createContext<(() => void) | null>(null)
 
 // Carries the now-playing snapshot, socket status, and a `suppressed` flag
 // (computed in sidepanel from the open-overlay locals) into the music bar.
-// Mirrors the nullable cross-mode slots above: candidate mode supplies it via
-// a Provider; other modes leave it `null` and the bar self-hides.
+// Unlike the candidate-only slots above, the bar is base-page chrome, so the
+// Provider wraps ALL three modes — the slot is non-null on every surface. The
+// `null` default exists only for a future editor-style surface that mounts the
+// bar without a Provider (the bar self-hides then); the live tree never relies
+// on it.
 export const MusicRemoteContext = createContext<MusicRemoteSlot>(null)

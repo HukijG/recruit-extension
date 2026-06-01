@@ -233,10 +233,14 @@ export function useMusicRemote(enabled: boolean): UseMusicRemoteReturn {
     wsRef.current = ws
 
     ws.onopen = () => {
-      // Reset backoff on a clean open so the NEXT drop starts from the floor.
-      backoffRef.current = BACKOFF_BASE_MS
       // Stay "connecting" until the first snapshot arrives — an open socket
-      // with no data yet isn't usefully "open" for the bar.
+      // with no data yet isn't usefully "open" for the bar. Backoff is NOT
+      // reset here: a worker that accepts the upgrade then immediately closes
+      // (e.g. post-handshake auth rejection — a live risk while the WS auth
+      // scheme is unresolved, see the header note above) would otherwise reset
+      // to the 1s floor on every bare open and hammer the edge in a tight
+      // reconnect loop. The reset rides the FIRST valid snapshot instead, which
+      // is the only signal that the connection is actually useful.
     }
 
     ws.onmessage = (event) => {
@@ -248,6 +252,9 @@ export function useMusicRemote(enabled: boolean): UseMusicRemoteReturn {
       }
       const snap = parseSnapshot(parsed)
       if (!snap) return
+      // First useful frame: this is a real, working connection, so collapse
+      // backoff to the floor for the NEXT drop. Idempotent on later frames.
+      backoffRef.current = BACKOFF_BASE_MS
       setStatus("open")
       setSnapshot(snap)
     }
