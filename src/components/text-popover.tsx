@@ -409,12 +409,17 @@ export function TextPopover({
   fullName,
   phoneNumber,
   callerAliasId,
-  onClose
+  onClose,
+  onManagerOpenChange
 }: {
   fullName: string
   phoneNumber: string | null
   callerAliasId?: string
   onClose: () => void
+  // Notifies the orchestrator when the full-screen template manager (z-300)
+  // opens or closes, so it can suppress the now-playing bar while the manager
+  // covers the panel. Optional — callers that don't host a bar omit it.
+  onManagerOpenChange?: (open: boolean) => void
 }) {
   const [text, setText] = useState("")
   const [confirming, setConfirming] = useState(false)
@@ -567,7 +572,10 @@ export function TextPopover({
             <span className="lr-text-picker-divider" aria-hidden="true" />
             <button
               type="button"
-              onClick={() => setManagerOpen(true)}
+              onClick={() => {
+                setManagerOpen(true)
+                onManagerOpenChange?.(true)
+              }}
               className="lr-text-edit-btn"
               aria-label="Open template manager">
               <PencilIcon />
@@ -626,7 +634,12 @@ export function TextPopover({
         </div>
       </div>
       {managerOpen && (
-        <TemplateManager onClose={() => setManagerOpen(false)} />
+        <TemplateManager
+          onClose={() => {
+            setManagerOpen(false)
+            onManagerOpenChange?.(false)
+          }}
+        />
       )}
     </div>
   )

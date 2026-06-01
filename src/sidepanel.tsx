@@ -8,11 +8,13 @@ import {
   UndoToast
 } from "~components/candidate"
 import { HeaderBar } from "~components/header-bar"
+import { MusicBar } from "~components/music-bar"
 import {
   AuthSecretInput,
   buildPayload,
   CandidateList,
   CandidateResultsList,
+  CONTAINER_BOTTOM_INSET,
   CsvDropZone,
   JobModal,
   matchCandidates,
@@ -28,12 +30,14 @@ import { TestCallView } from "~components/test-call"
 import { TextPopover } from "~components/text-popover"
 import { useCallStats } from "~lib/callStats"
 import { useCallStream } from "~lib/callStream"
+import { useMusicRemote } from "~lib/musicRemote"
 import { localStore, UNDO_DELAY_MS } from "~lib/constants"
 import {
   CallConfigContext,
   CallerIdPickerContext,
   CallStatsRefreshContext,
   CallStreamContext,
+  MusicRemoteContext,
   TextSlotContext
 } from "~lib/contexts"
 import type { DialpadUserContext } from "~lib/dialpad"
@@ -561,6 +565,13 @@ function SidePanel() {
   })
   const [selectedCallerAliasId, setSelectedCallerAliasId] = useState<string>("")
   const [textPopoverOpen, setTextPopoverOpen] = useState(false)
+  // The template manager is a full-screen z-300 modal mounted from inside
+  // TextPopover (not a top-level mode). It reports its open/closed state up so
+  // the now-playing bar is suppressed while it covers the panel. The text
+  // composer / settings popovers are dimmed-backdrop overlays that already
+  // sit above the bar by z-order, but the manager and job modal are opaque
+  // full-bleed surfaces, so they must explicitly suppress the bar's chrome.
+  const [managerOpen, setManagerOpen] = useState(false)
 
   // Fetch /dialpad-user-context once whenever we enter candidate mode. The
   // middleware response is small (devices + caller IDs aliased), and this
@@ -569,6 +580,7 @@ function SidePanel() {
     if (mode !== "candidate") {
       setContextState({ status: "loading" })
       setTextPopoverOpen(false)
+      setManagerOpen(false)
       return
     }
     let cancelled = false
@@ -608,10 +620,12 @@ function SidePanel() {
     }
   }, [mode, extensionSecret])
 
-  // Close any open SMS popover when the user navigates to a different
-  // candidate so the popover never shows stale fullName/phoneNumber.
+  // Close any open SMS popover (and its template manager) when the user
+  // navigates to a different candidate so neither shows stale
+  // fullName/phoneNumber.
   useEffect(() => {
     setTextPopoverOpen(false)
+    setManagerOpen(false)
   }, [candidateUrlId])
 
   const textSlot = useMemo(
@@ -645,6 +659,33 @@ function SidePanel() {
   const callConfig: CallConfig = {
     callerAliasId: selectedCallerAliasId || undefined
   }
+
+  // --- Now-playing music bar ---
+  //
+  // The bar is base-page chrome (mounted below, like global CSS), but only
+  // streams in candidate mode — the one mode that provides MusicRemoteContext.
+  // The socket itself is gated on `mode === "candidate"` inside the hook.
+  const music = useMusicRemote(mode === "candidate")
+
+  // Suppress the bar's chrome whenever a higher overlay covers the panel. The
+  // dimmed-backdrop popovers (settings, text composer) AND the opaque
+  // full-bleed surfaces (template manager, job modal) all count: the bar
+  // releases its reserved height and hides its controls so nothing peeks
+  // through. NB: suppression does NOT close the bar's own search overlay —
+  // that overlay owns its open/closed state so a transient blur can't destroy
+  // a half-typed query (the focus-loss reconciliation).
+  const sidepanelOverlayOpen =
+    textPopoverOpen || settingsOpen || managerOpen || showJobModal
+
+  // Reserve bottom padding for the fixed bar so the last row never hides
+  // behind it. When the bar is actually painting (candidate mode, not
+  // suppressed), reserve its height PLUS the standard bottom inset (keeping
+  // air above the bar). Otherwise just the inset, which replaces the
+  // container padding shorthand's bottom value rather than stacking on it.
+  const barReserved = mode === "candidate" && !sidepanelOverlayOpen
+  const containerPaddingBottom = barReserved
+    ? `calc(${CONTAINER_BOTTOM_INSET}px + var(--lr-music-bar-height, 0px))`
+    : `${CONTAINER_BOTTOM_INSET}px`
 
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [errorToast, setErrorToast] = useState<string | null>(null)
@@ -897,7 +938,13 @@ function SidePanel() {
 
   return (
     <CallStatsRefreshContext.Provider value={callStats.refresh}>
-    <div style={styles.container}>
+    <MusicRemoteContext.Provider
+      value={{
+        snapshot: music.snapshot,
+        status: music.status,
+        suppressed: sidepanelOverlayOpen
+      }}>
+    <div style={{ ...styles.container, paddingBottom: containerPaddingBottom }}>
       <HeaderBar
         daily={callStats.daily}
         onSettingsClick={() => setSettingsOpen(true)}
@@ -941,6 +988,7 @@ function SidePanel() {
               phoneNumber={candidateState.details.phoneNumber}
               callerAliasId={selectedCallerAliasId || undefined}
               onClose={() => setTextPopoverOpen(false)}
+              onManagerOpenChange={setManagerOpen}
             />
           )}
           {candidateState.phase === "ready" &&
@@ -1096,7 +1144,14 @@ function SidePanel() {
           )}
         </>
       )}
+      {/* Base-page chrome: rendered LAST so it's the final child of the
+          container, sitting below the dimmed-backdrop popovers by z-order and
+          above the candidate toasts via --lr-music-bar-height. The bar
+          self-hides outside candidate mode (no slot) and self-suppresses when
+          `suppressed` is set. */}
+      <MusicBar />
     </div>
+    </MusicRemoteContext.Provider>
     </CallStatsRefreshContext.Provider>
   )
 }

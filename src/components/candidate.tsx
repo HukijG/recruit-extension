@@ -938,7 +938,10 @@ const candidateStyles: Record<string, React.CSSProperties> = {
   },
   toast: {
     position: "fixed",
-    bottom: "16px",
+    // Ride above the now-playing music bar when it's present; the bar writes
+    // its height to --lr-music-bar-height (0px when absent), so this keeps a
+    // constant 16px gap above either the bar or the panel bottom.
+    bottom: "calc(16px + var(--lr-music-bar-height, 0px))",
     left: "16px",
     right: "16px",
     padding: "10px 14px",
@@ -955,7 +958,8 @@ const candidateStyles: Record<string, React.CSSProperties> = {
   },
   toastError: {
     position: "fixed",
-    bottom: "16px",
+    // See `toast` above — keep error toasts above the music bar too.
+    bottom: "calc(16px + var(--lr-music-bar-height, 0px))",
     left: "16px",
     right: "16px",
     padding: "10px 14px",

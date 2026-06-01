@@ -1091,9 +1091,16 @@ export function CandidateList({ candidates }: { candidates: Candidate[] }) {
 
 // --- Styles ---
 
+// Bottom breathing room baked into the page container's padding shorthand.
+// The music bar (position:fixed) overlays the bottom of the panel, so when it
+// is present sidepanel reserves CONTAINER_BOTTOM_INSET + bar-height instead of
+// this bare inset — keeping this much air ABOVE the bar so the last row never
+// sits flush against it. Exported so sidepanel can reuse the exact value.
+export const CONTAINER_BOTTOM_INSET = 24
+
 export const styles: Record<string, React.CSSProperties> = {
   container: {
-    padding: "24px 16px",
+    padding: `24px 16px ${CONTAINER_BOTTOM_INSET}px`,
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     display: "flex",
     flexDirection: "column",
