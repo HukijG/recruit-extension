@@ -24,16 +24,14 @@ const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
     return
   }
 
-  const url = `${MUSIC_URL.replace(/\/+$/, "")}${ROUTE_PATH}`
-  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  // The worker serves playlist-search as an idempotent GET with the query in
+  // ?q=; POSTing here would hit its 405 (method-not-allowed) and break search.
+  const url = `${MUSIC_URL.replace(/\/+$/, "")}${ROUTE_PATH}?q=${encodeURIComponent(query.trim())}`
+  const headers: Record<string, string> = {}
   if (secret) headers["X-Extension-Token"] = secret
 
   try {
-    const resp = await fetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ query: query.trim() })
-    })
+    const resp = await fetch(url, { method: "GET", headers })
     if (!resp.ok) {
       res.send({ ok: false, error: `${resp.status} ${resp.statusText}` })
       return

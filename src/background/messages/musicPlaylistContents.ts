@@ -28,16 +28,14 @@ const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
     return
   }
 
-  const url = `${MUSIC_URL.replace(/\/+$/, "")}${ROUTE_PATH}`
-  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  // The worker serves playlist-contents as an idempotent GET reading ?id= (a
+  // numeric Deezer id); POSTing here would hit its 405 and break drill-in.
+  const url = `${MUSIC_URL.replace(/\/+$/, "")}${ROUTE_PATH}?id=${id}`
+  const headers: Record<string, string> = {}
   if (secret) headers["X-Extension-Token"] = secret
 
   try {
-    const resp = await fetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ id })
-    })
+    const resp = await fetch(url, { method: "GET", headers })
     if (!resp.ok) {
       res.send({ ok: false, error: `${resp.status} ${resp.statusText}` })
       return
