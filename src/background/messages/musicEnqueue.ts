@@ -4,9 +4,10 @@ const MIDDLEWARE_URL = process.env.PLASMO_PUBLIC_MIDDLEWARE_URL
 const ROUTE_PATH = "/music/enqueue"
 
 // Add a song to the queue. Mirrors the dashboard's { id } payload; the id is a
-// numeric Deezer id (frozen contract) and is guarded so a non-number can't
-// reach the worker. Fire-and-forget — the queue change surfaces through the
-// now-playing WS stream, not this response.
+// STRING Deezer id (the dashboard's IdBody { id: String } and enqueueSong(id:
+// string)), guarded so an empty/non-string id can't reach the worker.
+// Fire-and-forget — the queue change surfaces through the now-playing WS
+// stream, not this response.
 const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
   if (!MIDDLEWARE_URL) {
     res.send({
@@ -19,7 +20,7 @@ const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
 
   const { id, secret } = req.body ?? {}
 
-  if (typeof id !== "number") {
+  if (typeof id !== "string" || !id) {
     res.send({ ok: false, error: "Missing song id" })
     return
   }

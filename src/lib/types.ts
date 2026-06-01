@@ -240,10 +240,20 @@ export type TemplateVariable = "firstName"
 // repos at once.
 
 export interface NowPlayingTrack {
-  loadId: string
+  // u64 on the dashboard wire (relay protocol `load_id`), serialised as a JSON
+  // NUMBER. The reanchor() reset compares this on equality, so it stays the
+  // raw number rather than a coerced string.
+  loadId: number
   title: string
+  // The dashboard's TrackMetadata carries `artists: Vec<String>` (a JSON
+  // array). parseSnapshot joins it to a single display string at the edge;
+  // the bar renders one comma-separated line, so the stored shape is a string.
   artists: string
   album: string
+  // `art_url: Option<String>` on the wire — serde emits `null` when a track
+  // has no cover. Normalised to "" at parse time; the bar branches on falsy
+  // artUrl to show its empty-art fallback, so a missing cover must NOT drop
+  // the frame.
   artUrl: string
   durationMs: number
 }
@@ -261,21 +271,31 @@ export interface NowPlayingSnapshot {
 // awaiting backoff reconnect.
 export type MusicWsStatus = "idle" | "connecting" | "open" | "closed" | "error"
 
-// A single Deezer search hit. Deezer ids are numeric (the frozen contract);
-// song actions (enqueue / play) post the dashboard's `{ id }` payload.
+// A single Deezer search hit. The id is the canonical Deezer track id — a
+// STRING on the dashboard wire (`SearchResult.id: String`, and the dashboard's
+// own `enqueueSong(id: string)`), because Deezer ids can exceed 2^53 and
+// numeric coercion is lossy. Song actions (enqueue / play) post the
+// dashboard's `{ id: <string> }` payload verbatim.
+//
+// NB: the frozen contract handed to this work says "Deezer ids numeric"; the
+// dashboard's catalogue + lib/songs.ts make them strings end-to-end. We
+// implement against reality (string) so rows actually parse; the contradiction
+// is recorded as an escalation.
 export interface MusicSongResult {
-  id: number
+  id: string
   title: string
   artists: string
   album: string
+  // Normalised to "" when the wire cover is null — the row branches on falsy
+  // artUrl to render its empty-art placeholder.
   artUrl: string
   durationMs: number
 }
 
-// A single playlist search hit. Playlist actions post `{ id }`; ids are
-// numeric to match the dashboard.
+// A single playlist search hit. Playlist actions post `{ id: <string> }`; the
+// id is a string for the same reason as song ids above.
 export interface MusicPlaylistResult {
-  id: number
+  id: string
   title: string
   creator: string
   artUrl: string

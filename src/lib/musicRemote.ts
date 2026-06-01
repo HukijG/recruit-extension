@@ -6,22 +6,36 @@ import type {
   NowPlayingTrack
 } from "~lib/types"
 
-// useMusicRemote — the side-panel DO WebSocket subscription for now-playing,
-// plus a monotonic progress interpolator so the bar's scrubber advances
-// smoothly between (sparse) snapshots.
+// useMusicRemote — the side-panel DO WebSocket subscription for now-playing.
+// It owns ONLY the WS lifecycle and the latest RAW snapshot/status; it does
+// NOT tick. The monotonic progress interpolator (the 4Hz clock) is a separate
+// hook, `useInterpolatedPosition`, run inside the bar subtree so playback only
+// re-renders the bar — never the orchestrator that hosts this subscription.
+// Hoisting the clock here would re-render every mode subtree at 4Hz during
+// playback, defeating the bar's "self-contained" mandate.
 //
-// WS AUTH (frozen contract + escalation):
-//   The bar talks to the WORKER only, reusing existing auth. A browser
-//   WebSocket cannot set the X-Extension-Token / Access-JWT header, and
-//   putting the secret in the wss:// query would leak it into Cloudflare,
-//   worker, proxy, and devtools logs. So the handshake carries ZERO token in
-//   the URL and relies on the Cloudflare Access same-origin cookie the
-//   browser attaches automatically to the worker origin (same origin as
-//   PLASMO_PUBLIC_MIDDLEWARE_URL, already in host_permissions). We never
-//   self-select a query-param token path. If the worker side isn't serving
-//   the cookie-authenticated WS yet, the socket simply fails the handshake
-//   and the hook sits in `error`/backoff — it does not fall back to a
-//   token-in-URL scheme.
+// WS AUTH — OPEN CONTRACT GAP, ESCALATED (do NOT treat as resolved):
+//   The frozen contract says now-playing rides the worker's DO WS route using
+//   "existing auth (X-Extension-Token / Access JWT)". But a browser WebSocket
+//   CANNOT set a custom request header, so neither named scheme can be carried
+//   on the handshake, and a token in the wss:// query would leak into
+//   Cloudflare / worker / proxy / devtools logs. The contract-faithful
+//   resolutions (a short-lived ticket minted via an authed HTTP call then
+//   passed as a one-time path segment or subprotocol; OR the worker accepting
+//   the Access cookie, documented in the contract) BOTH require a worker-side
+//   contract decision — and the worker's /music WS route does not exist yet,
+//   so neither can be implemented or verified here. We do NOT unilaterally
+//   invent a ticket endpoint or pin cookie-auth as the answer.
+//
+//   As-is behaviour (the only thing a browser WS can do without a worker
+//   contract): open the handshake with no token in the URL. If the worker
+//   origin is behind Cloudflare Access, the browser attaches the same-origin
+//   Access cookie automatically and the upgrade may authenticate; if not (a
+//   legacy X-Extension-Token-only user, or a worker that authenticates the
+//   upgrade on a header), the handshake fails and the hook sits in
+//   error/backoff. The legacy X-Extension-Token-only path has NO working WS
+//   auth until the worker contract names a header-free scheme. This is an
+//   escalation, not a shipped decision.
 //
 // CONNECT GATING:
 //   The socket only opens while the side panel is in candidate mode (the one
@@ -45,8 +59,11 @@ const BACKOFF_BASE_MS = 1_000
 const BACKOFF_CAP_MS = 15_000
 
 export interface UseMusicRemoteReturn {
-  // The latest snapshot as streamed (isPlaying + the track), with positionMs
-  // OVERRIDDEN by the interpolator so the bar always reads a live position.
+  // The latest RAW snapshot as streamed (isPlaying + the track + the
+  // snapshot's own positionMs). Identity changes only when a fresh frame
+  // arrives — NOT every tick — so hosting this in the orchestrator does not
+  // re-render the app at 4Hz. The bar splices a live position over positionMs
+  // via useInterpolatedPosition.
   snapshot: NowPlayingSnapshot | null
   status: MusicWsStatus
 }
@@ -67,9 +84,24 @@ function buildWsUrl(): string | null {
   }
 }
 
-// Narrowing parse of an inbound WS frame into a NowPlayingSnapshot. Rejects
-// anything that doesn't match the frozen camelCase shape so a malformed frame
-// can't poison the interpolator. Returns null on any mismatch.
+// Normalise the wire's `artists` (the dashboard ships `Vec<String>` — a JSON
+// array) down to one display string. Accepts a single string too, in case the
+// worker pre-joins. Anything else → null (the field is required on a track).
+function normalizeArtists(raw: unknown): string | null {
+  if (typeof raw === "string") return raw
+  if (Array.isArray(raw)) {
+    const names = raw.filter((a): a is string => typeof a === "string")
+    if (names.length !== raw.length) return null
+    return names.join(", ")
+  }
+  return null
+}
+
+// Narrowing parse of an inbound WS frame into a NowPlayingSnapshot. Accepts the
+// real dashboard wire types — `loadId` is a u64 NUMBER, `artists` a STRING
+// ARRAY, `artUrl` a NULLABLE string — and normalises them to the bar's stored
+// shape (joined artist string, "" for a missing cover). Returns null only on a
+// frame that's genuinely malformed, so a track with no art still renders.
 function parseSnapshot(raw: unknown): NowPlayingSnapshot | null {
   if (!raw || typeof raw !== "object") return null
   const obj = raw as Record<string, unknown>
@@ -80,20 +112,26 @@ function parseSnapshot(raw: unknown): NowPlayingSnapshot | null {
   let track: NowPlayingTrack | null = null
   if (rawTrack && typeof rawTrack === "object") {
     const t = rawTrack as Record<string, unknown>
+    const artists = normalizeArtists(t.artists)
+    // art_url is Option<String>: a string, or null/undefined → "".
+    const artUrlOk =
+      typeof t.artUrl === "string" ||
+      t.artUrl === null ||
+      t.artUrl === undefined
     if (
-      typeof t.loadId === "string" &&
+      typeof t.loadId === "number" &&
       typeof t.title === "string" &&
-      typeof t.artists === "string" &&
+      artists !== null &&
       typeof t.album === "string" &&
-      typeof t.artUrl === "string" &&
+      artUrlOk &&
       typeof t.durationMs === "number"
     ) {
       track = {
         loadId: t.loadId,
         title: t.title,
-        artists: t.artists,
+        artists,
         album: t.album,
-        artUrl: t.artUrl,
+        artUrl: typeof t.artUrl === "string" ? t.artUrl : "",
         durationMs: t.durationMs
       }
     } else {
@@ -112,30 +150,13 @@ function parseSnapshot(raw: unknown): NowPlayingSnapshot | null {
   }
 }
 
-// Anchor for monotonic interpolation: the snapshot's position captured at a
-// performance.now() instant. Between snapshots the displayed position is
-// anchorPositionMs + (now - anchorClock) when playing, clamped to the track
-// duration, and frozen when paused.
-interface InterpAnchor {
-  loadId: string | null
-  anchorPositionMs: number
-  anchorClock: number
-  isPlaying: boolean
-  durationMs: number
-}
-
 export function useMusicRemote(enabled: boolean): UseMusicRemoteReturn {
   const [snapshot, setSnapshot] = useState<NowPlayingSnapshot | null>(null)
   const [status, setStatus] = useState<MusicWsStatus>("idle")
-  // The interpolated position, written every tick. Kept separate from the raw
-  // snapshot so re-anchoring on each frame doesn't churn the whole snapshot
-  // object identity.
-  const [displayPositionMs, setDisplayPositionMs] = useState(0)
 
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const backoffRef = useRef(BACKOFF_BASE_MS)
-  const anchorRef = useRef<InterpAnchor | null>(null)
   // Guards async close callbacks from scheduling reconnects after the hook
   // has been disabled/unmounted.
   const activeRef = useRef(false)
@@ -168,27 +189,6 @@ export function useMusicRemote(enabled: boolean): UseMusicRemoteReturn {
       }
       wsRef.current = null
     }
-  }, [])
-
-  // Re-anchor the interpolator from a freshly streamed snapshot. On a load-id
-  // change we FULLY reset (position jumps to the snapshot's position, no
-  // monotonic carry-over from the previous track). Within the same track we
-  // re-anchor to the snapshot's authoritative position — trusting the worker
-  // over our own drift — but the per-tick clamp below keeps the DISPLAY
-  // monotonic between re-anchors.
-  const reanchor = useCallback((snap: NowPlayingSnapshot) => {
-    const loadId = snap.track?.loadId ?? null
-    const durationMs = snap.track?.durationMs ?? 0
-    anchorRef.current = {
-      loadId,
-      anchorPositionMs: snap.positionMs,
-      anchorClock: performance.now(),
-      isPlaying: snap.isPlaying,
-      durationMs
-    }
-    setDisplayPositionMs(
-      Math.max(0, Math.min(snap.positionMs, durationMs || snap.positionMs))
-    )
   }, [])
 
   const scheduleReconnect = useCallback(() => {
@@ -244,7 +244,6 @@ export function useMusicRemote(enabled: boolean): UseMusicRemoteReturn {
       if (!snap) return
       setStatus("open")
       setSnapshot(snap)
-      reanchor(snap)
     }
 
     ws.onerror = () => {
@@ -262,7 +261,7 @@ export function useMusicRemote(enabled: boolean): UseMusicRemoteReturn {
       setStatus("error")
       scheduleReconnect()
     }
-  }, [reanchor, teardownSocket, scheduleReconnect])
+  }, [teardownSocket, scheduleReconnect])
 
   // Keep connectRef pointing at the freshest connect closure so the
   // reconnect timer (scheduled via scheduleReconnect) always re-opens with
@@ -280,10 +279,8 @@ export function useMusicRemote(enabled: boolean): UseMusicRemoteReturn {
       activeRef.current = false
       clearReconnect()
       teardownSocket()
-      anchorRef.current = null
       setStatus("idle")
       setSnapshot(null)
-      setDisplayPositionMs(0)
       return
     }
     activeRef.current = true
@@ -296,11 +293,80 @@ export function useMusicRemote(enabled: boolean): UseMusicRemoteReturn {
     }
   }, [enabled, connect, clearReconnect, teardownSocket])
 
-  // Monotonic interpolation tick. Each tick advances the displayed position
-  // from the current anchor on the performance clock. Paused → frozen at the
-  // anchor. The clamp is monotonic-within-track: the display never goes
-  // backwards except on an explicit re-anchor or a load-id reset (both routed
-  // through reanchor()).
+  // The RAW snapshot — its positionMs is the last-streamed value, advanced
+  // smoothly by useInterpolatedPosition inside the bar (NOT here). Identity is
+  // stable between frames, so the orchestrator that hosts this hook re-renders
+  // only when a fresh frame lands, never on the interpolation clock.
+  return { snapshot, status }
+}
+
+// Anchor for monotonic interpolation: a snapshot's position captured at a
+// performance.now() instant. Between snapshots the displayed position is
+// anchorPositionMs + (now - anchorClock) when playing, clamped to the track
+// duration, and frozen when paused.
+interface InterpAnchor {
+  loadId: number | null
+  anchorPositionMs: number
+  anchorClock: number
+  isPlaying: boolean
+  durationMs: number
+}
+
+// useInterpolatedPosition — the 4Hz progress clock, run INSIDE the bar subtree.
+//
+// Given the raw snapshot (whose positionMs only changes when a fresh frame
+// lands) it returns a live position in ms that advances ~4×/s while playing.
+// Because the per-tick setState lives in whatever component calls this hook
+// (the bar), only that subtree re-renders on the clock — the orchestrator that
+// owns the WS subscription is untouched. This is the whole point of the split:
+// the music feature's high-frequency clock must not leak app-wide.
+//
+// Re-anchoring: on a load-id change we FULLY reset (the display jumps to the
+// new snapshot's position, no monotonic carry-over from the previous track).
+// Within the same track we re-anchor to the snapshot's authoritative position
+// — trusting the worker over our own drift — while the per-tick clamp keeps the
+// DISPLAY monotonic between re-anchors. `enabled` gates the tick so a hidden
+// bar burns no interval.
+export function useInterpolatedPosition(
+  snapshot: NowPlayingSnapshot | null,
+  enabled: boolean
+): number {
+  const [displayPositionMs, setDisplayPositionMs] = useState(0)
+  const anchorRef = useRef<InterpAnchor | null>(null)
+
+  // Re-anchor whenever a fresh snapshot lands (new object identity from the
+  // subscription). Reset the display to the snapshot's position on a load-id
+  // change; otherwise re-anchor in place and let the clamp carry the display.
+  useEffect(() => {
+    if (!snapshot) {
+      anchorRef.current = null
+      setDisplayPositionMs(0)
+      return
+    }
+    const loadId = snapshot.track?.loadId ?? null
+    const durationMs = snapshot.track?.durationMs ?? 0
+    const prevLoadId = anchorRef.current?.loadId ?? null
+    anchorRef.current = {
+      loadId,
+      anchorPositionMs: snapshot.positionMs,
+      anchorClock: performance.now(),
+      isPlaying: snapshot.isPlaying,
+      durationMs
+    }
+    const anchored = Math.max(
+      0,
+      Math.min(snapshot.positionMs, durationMs || snapshot.positionMs)
+    )
+    // On a track change, hard-reset; within a track, never jump backwards on
+    // the display (the tick clamp owns monotonicity), but DO adopt a forward
+    // correction from the worker.
+    setDisplayPositionMs((prev) =>
+      loadId !== prevLoadId ? anchored : Math.max(prev, anchored)
+    )
+  }, [snapshot])
+
+  // Monotonic interpolation tick. Advances the displayed position from the
+  // current anchor on the performance clock; paused → frozen at the anchor.
   useEffect(() => {
     if (!enabled) return
     const id = setInterval(() => {
@@ -319,12 +385,5 @@ export function useMusicRemote(enabled: boolean): UseMusicRemoteReturn {
     return () => clearInterval(id)
   }, [enabled])
 
-  // Surface the snapshot with the interpolated position spliced in so the bar
-  // reads one coherent object. Identity changes each tick while playing,
-  // which is intended — the scrubber needs to advance.
-  const merged: NowPlayingSnapshot | null = snapshot
-    ? { ...snapshot, positionMs: displayPositionMs }
-    : null
-
-  return { snapshot: merged, status }
+  return displayPositionMs
 }

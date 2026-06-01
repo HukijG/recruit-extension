@@ -4,8 +4,8 @@ const MIDDLEWARE_URL = process.env.PLASMO_PUBLIC_MIDDLEWARE_URL
 const ROUTE_PATH = "/music/play"
 
 // Play a song now (jump the queue). Mirrors the dashboard's { id } payload;
-// numeric Deezer id, guarded. Sibling of musicEnqueue — fire-and-forget,
-// truth via the now-playing WS stream.
+// STRING Deezer id, guarded. Sibling of musicEnqueue — fire-and-forget, truth
+// via the now-playing WS stream.
 const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
   if (!MIDDLEWARE_URL) {
     res.send({
@@ -18,7 +18,7 @@ const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
 
   const { id, secret } = req.body ?? {}
 
-  if (typeof id !== "number") {
+  if (typeof id !== "string" || !id) {
     res.send({ ok: false, error: "Missing song id" })
     return
   }

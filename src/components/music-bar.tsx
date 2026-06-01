@@ -5,6 +5,7 @@ import { useStorage } from "@plasmohq/storage/hook"
 
 import { localStore } from "~lib/constants"
 import { MusicRemoteContext } from "~lib/contexts"
+import { useInterpolatedPosition } from "~lib/musicRemote"
 import type { MusicPlaylistResult, MusicSongResult } from "~lib/types"
 
 // --- Now-Playing Music Bar ---
@@ -905,6 +906,12 @@ export function MusicBar() {
   // shows nothing rather than an empty shell.)
   const barVisible = !!slot && !suppressed && hasTrack
 
+  // The 4Hz progress clock lives HERE, in the bar subtree, not in the
+  // orchestrator that owns the WS subscription — so playback re-renders only
+  // the bar. Gated on barVisible so a suppressed/empty bar burns no interval.
+  // Must run before any early return to satisfy the Rules of Hooks.
+  const displayPositionMs = useInterpolatedPosition(snapshot, barVisible)
+
   // CSS-var height seam. ONE effect, declared before any early return, so the
   // 0px-reset path is never split across the null-return branch below. It
   // writes BAR_HEIGHT_PX when the bar is painting and 0px otherwise; the
@@ -939,7 +946,7 @@ export function MusicBar() {
   }
 
   const isPlaying = snapshot?.isPlaying ?? false
-  const positionMs = snapshot?.positionMs ?? 0
+  const positionMs = displayPositionMs
   const durationMs = track?.durationMs ?? 0
   const progressPct =
     durationMs > 0 ? Math.max(0, Math.min(100, (positionMs / durationMs) * 100)) : 0

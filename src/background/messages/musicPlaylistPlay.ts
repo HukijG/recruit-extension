@@ -3,7 +3,7 @@ import type { PlasmoMessaging } from "@plasmohq/messaging"
 const MIDDLEWARE_URL = process.env.PLASMO_PUBLIC_MIDDLEWARE_URL
 const ROUTE_PATH = "/music/playlist-play"
 
-// Play an entire playlist. Mirrors the dashboard's { id } payload; numeric
+// Play an entire playlist. Mirrors the dashboard's { id } payload; STRING
 // Deezer playlist id, guarded. Sibling of musicPlay — fire-and-forget, truth
 // via the now-playing WS stream.
 const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
@@ -18,7 +18,7 @@ const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
 
   const { id, secret } = req.body ?? {}
 
-  if (typeof id !== "number") {
+  if (typeof id !== "string" || !id) {
     res.send({ ok: false, error: "Missing playlist id" })
     return
   }

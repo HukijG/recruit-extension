@@ -1,41 +1,12 @@
 import type { PlasmoMessaging } from "@plasmohq/messaging"
 
-import type { MusicPlaylistResult } from "~lib/types"
+import { parsePlaylists } from "~lib/musicParse"
 
 const MIDDLEWARE_URL = process.env.PLASMO_PUBLIC_MIDDLEWARE_URL
 const ROUTE_PATH = "/music/playlist-search"
 
-// Playlist search (submit-only). Returns a normalised MusicPlaylistResult[].
-// Numeric Deezer ids (frozen contract); malformed rows are dropped.
-function parsePlaylists(raw: unknown): MusicPlaylistResult[] {
-  const list = Array.isArray(raw)
-    ? raw
-    : raw && typeof raw === "object" && Array.isArray((raw as { results?: unknown }).results)
-      ? (raw as { results: unknown[] }).results
-      : []
-  const out: MusicPlaylistResult[] = []
-  for (const item of list) {
-    if (!item || typeof item !== "object") continue
-    const r = item as Record<string, unknown>
-    if (
-      typeof r.id === "number" &&
-      typeof r.title === "string" &&
-      typeof r.creator === "string" &&
-      typeof r.artUrl === "string" &&
-      typeof r.trackCount === "number"
-    ) {
-      out.push({
-        id: r.id,
-        title: r.title,
-        creator: r.creator,
-        artUrl: r.artUrl,
-        trackCount: r.trackCount
-      })
-    }
-  }
-  return out
-}
-
+// Playlist search (submit-only). Returns a normalised MusicPlaylistResult[]
+// via the shared, Paged-aware parser; malformed rows are dropped.
 const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
   if (!MIDDLEWARE_URL) {
     res.send({
