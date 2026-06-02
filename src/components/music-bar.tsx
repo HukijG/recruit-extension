@@ -328,10 +328,13 @@ if (
     }
     .lr-music-close-btn:active { transform: translateY(1px); }
 
-    /* ----- Full-width search input (always the sheet's top affordance) ----- */
+    /* ----- Full-width search input (always the sheet's top affordance) -----
+       flex-shrink:0 is load-bearing: the input is a direct child of the sheet's
+       COLUMN flex container, so a flex-grow here would make it grow to eat the
+       whole sheet (the body/art would collapse beneath it). It's a fixed-height
+       row spanning the full width. */
     .lr-music-search-input {
-      flex: 1 1 0;
-      min-width: 0;
+      flex-shrink: 0;
       width: 100%;
       box-sizing: border-box;
       padding: 13px 16px;
@@ -459,22 +462,16 @@ if (
       justify-content: center;
       gap: 12px;
     }
-    /* Volume row sits on its OWN line below transport (don't cram horizontally
-       — use the vertical space). A small leading label anchors the pair. */
+    /* Volume row sits on its OWN line directly below transport (don't cram
+       horizontally — use the vertical space). The two buttons are centred in
+       the row; no leading label. */
     .lr-music-np-volume {
       flex-shrink: 0;
       margin: 12px 0 0 0;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 10px;
-    }
-    .lr-music-np-volume-label {
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      color: #3c4043;
+      gap: 12px;
     }
 
     /* ----- Tabs (Songs / Playlists) — their OWN row, never beside the input ----- */
@@ -1263,7 +1260,6 @@ function MusicSheet({
       </div>
 
       <div className="lr-music-np-volume">
-        <span className="lr-music-np-volume-label">Volume</span>
         <button
           type="button"
           className="lr-music-ctrl"
