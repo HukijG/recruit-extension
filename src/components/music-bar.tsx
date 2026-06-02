@@ -1,5 +1,5 @@
 import { sendToBackground } from "@plasmohq/messaging"
-import { useContext, useEffect, useRef, useState } from "react"
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react"
 
 import { useStorage } from "@plasmohq/storage/hook"
 
@@ -14,13 +14,22 @@ import type {
 
 // --- Now-Playing Music Bar ---
 //
-// Self-contained feature module. Owns the fixed bottom bar (art + title /
-// artist + transport + volume + a search trigger), the expanded search
-// overlay (which mirrors text-popover.tsx's popover conventions — 220ms
-// pop-in, 160ms backdrop fade, dimmed backdrop, explicit-close-only), and the
-// CSS-class / keyframe injection it needs. sidepanel.tsx only MOUNTS it as
-// base-page chrome and supplies data via MusicRemoteContext; no feature UI
-// lives in sidepanel.
+// Self-contained feature module. Owns the fixed bottom bar (art + a
+// marquee-scrolling title/artist + prev/play-pause/next + a small expand
+// chevron), the expanded bottom-sheet (which mirrors text-popover.tsx's
+// popover conventions — dimmed backdrop, 160ms backdrop fade, the rounded
+// surface and palette — but GROWS UPWARD from the bar instead of being
+// vertically centred), and the CSS-class / keyframe injection it needs.
+// sidepanel.tsx only MOUNTS it as base-page chrome and supplies data via
+// MusicRemoteContext; no feature UI lives in sidepanel.
+//
+// The sheet's TOP is a full-width search input. Its default body is the
+// now-playing detail (full art + title/artist + transport + volume). When the
+// search input is focused OR holds a query, a search overlay (tabs on their
+// own row, then a full-width scrolling results list) covers the now-playing
+// body. The overlay only closes on an explicit X / Escape — never on blur — so
+// a focused or half-typed query can't be destroyed by an incidental side-panel
+// blur.
 //
 // HEIGHT SEAM: the bar is position:fixed, so it doesn't occupy layout flow.
 // It writes its own height to the document-root CSS var --lr-music-bar-height
@@ -34,7 +43,7 @@ import type {
 const BAR_HEIGHT_PX = 64
 const BAR_HEIGHT_VAR = "--lr-music-bar-height"
 
-// m:ss display for the popover's now-playing progress readout. Clamps negatives
+// m:ss display for the sheet's now-playing progress readout. Clamps negatives
 // to 0:00 and tolerates a missing duration (renders "0:00" rather than NaN).
 function formatClock(ms: number): string {
   const totalSec = Math.max(0, Math.floor((ms || 0) / 1000))
@@ -51,10 +60,6 @@ if (
   const styleEl = document.createElement("style")
   styleEl.setAttribute(MUSIC_BAR_STYLE_ATTR, "")
   styleEl.textContent = `
-    @keyframes lr-music-pop-in {
-      0%   { opacity: 0; transform: translateY(8px) scale(0.985); }
-      100% { opacity: 1; transform: translateY(0) scale(1); }
-    }
     @keyframes lr-music-fade-in {
       from { opacity: 0; }
       to   { opacity: 1; }
@@ -62,6 +67,23 @@ if (
     @keyframes lr-music-bar-rise {
       from { opacity: 0; transform: translateY(100%); }
       to   { opacity: 1; transform: translateY(0); }
+    }
+    /* Bottom-sheet grow: rises from the bar (translateY up) with a touch of
+       scale, mirroring the text-popover pop-in feel but anchored to the bottom
+       edge rather than the vertical centre. */
+    @keyframes lr-music-sheet-rise {
+      0%   { opacity: 0; transform: translateY(24px) scale(0.99); }
+      100% { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    /* Marquee ping-pong. Holds at each end so the start of the title is
+       readable, then eases across by the measured overflow distance
+       (--lr-marquee-shift, a negative px value set per-element). */
+    @keyframes lr-music-marquee {
+      0%   { transform: translateX(0); }
+      12%  { transform: translateX(0); }
+      50%  { transform: translateX(var(--lr-marquee-shift, 0)); }
+      62%  { transform: translateX(var(--lr-marquee-shift, 0)); }
+      100% { transform: translateX(0); }
     }
 
     /* ----- Fixed bar shell ----- */
@@ -113,25 +135,31 @@ if (
       justify-content: center;
       gap: 2px;
     }
+    /* Marquee viewport: clips the overflowing line. The inner track holds the
+       text and animates only when JS has measured an overflow (data-scroll). */
+    .lr-music-marquee {
+      min-width: 0;
+      overflow: hidden;
+    }
+    .lr-music-marquee-track {
+      display: inline-block;
+      white-space: nowrap;
+      will-change: transform;
+    }
+    .lr-music-marquee[data-scroll="true"] .lr-music-marquee-track {
+      animation: lr-music-marquee 9s ease-in-out infinite;
+    }
     .lr-music-title {
-      margin: 0;
       font-size: 14px;
       font-weight: 600;
       color: #15171a;
       line-height: 1.2;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
     }
     .lr-music-artist {
-      margin: 0;
       font-size: 13px;
       font-weight: 400;
       color: #5f6368;
       line-height: 1.2;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
     }
     /* Thin progress line pinned to the very top edge of the bar. */
     .lr-music-progress-track {
@@ -176,17 +204,6 @@ if (
       cursor: not-allowed;
     }
     .lr-music-ctrl:disabled:hover { background-color: transparent; }
-    /* Toggled-on state for the popover's search-entry control (search panel
-       open) — tints it the primary blue so it reads as the active face. */
-    .lr-music-ctrl[data-active="true"] {
-      background-color: #0a66c2;
-      color: #ffffff;
-      border-color: #0a66c2;
-    }
-    .lr-music-ctrl[data-active="true"]:hover {
-      background-color: #084e9c;
-      border-color: #084e9c;
-    }
 
     /* Primary play/pause — filled blue pill, sized up. */
     .lr-music-ctrl--primary {
@@ -208,42 +225,149 @@ if (
       border-color: #e3e6ea;
     }
 
-    /* ----- Search overlay (mirrors text-popover conventions) ----- */
+    /* The expand chevron is DELIBERATELY smaller than the transport pills (28px
+       vs 36/40px) so it reads as a subordinate affordance, not a fourth
+       transport button. */
+    .lr-music-expand {
+      width: 28px;
+      height: 28px;
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      background-color: transparent;
+      color: #5f6368;
+      border: 1px solid #d6dbe1;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, transform 120ms ease;
+    }
+    .lr-music-expand:hover {
+      background-color: #f4f6f8;
+      border-color: #c2c8d0;
+      color: #2e3133;
+    }
+    .lr-music-expand:active { transform: translateY(1px); }
+
+    /* ----- Bottom sheet (mirrors text-popover visuals, bottom-anchored) ----- */
     .lr-music-backdrop {
       position: fixed;
       inset: 0;
       background-color: rgba(15, 23, 42, 0.32);
       z-index: 220;
       display: flex;
-      align-items: center;
+      align-items: flex-end;
       justify-content: center;
-      padding: 16px;
+      padding: 0;
       animation: lr-music-fade-in 160ms ease-out;
     }
-    .lr-music-popover {
+    /* Grows up from the bar to fill most of the panel like a bottom sheet.
+       Squared bottom corners (it's anchored to the panel's bottom edge);
+       rounded top corners only. */
+    .lr-music-sheet {
       width: 100%;
       max-width: 100%;
-      height: 55vh;
-      min-height: 400px;
-      max-height: 60vh;
+      height: 72vh;
+      min-height: 440px;
+      max-height: 82vh;
+      box-sizing: border-box;
       background-color: #ffffff;
-      border: 1px solid #e3e6ea;
-      border-radius: 18px;
-      box-shadow: 0 16px 40px rgba(15,23,42,0.22);
-      padding: 24px 22px 22px;
+      border-top: 1px solid #e3e6ea;
+      border-left: 1px solid #e3e6ea;
+      border-right: 1px solid #e3e6ea;
+      border-top-left-radius: 20px;
+      border-top-right-radius: 20px;
+      box-shadow: 0 -16px 40px rgba(15,23,42,0.22);
+      padding: 22px 22px 22px;
       display: flex;
       flex-direction: column;
-      animation: lr-music-pop-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+      gap: 16px;
+      animation: lr-music-sheet-rise 220ms cubic-bezier(0.22, 1, 0.36, 1);
     }
 
-    /* ----- Now-playing detail face (full art + transport, popover-only) -----
-       The collapsed bar only has room for a 44px art thumb; the spec's "full
-       album art" lives here. The search panel overlays this face (absolute,
-       same rounded frame) when search is active. */
+    /* Sheet header: title + explicit close. */
+    .lr-music-sheet-head {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .lr-music-sheet-title {
+      margin: 0;
+      font-size: 19px;
+      font-weight: 700;
+      line-height: 1.1;
+      color: #15171a;
+      letter-spacing: -0.01em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .lr-music-close-btn {
+      width: 30px;
+      height: 30px;
+      flex-shrink: 0;
+      background-color: transparent;
+      color: #d23a2c;
+      border: 1px solid #d23a2c;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      padding: 0;
+      transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+    }
+    .lr-music-close-btn:hover {
+      background-color: #d23a2c;
+      color: #ffffff;
+      box-shadow: 0 2px 6px rgba(210,58,44,0.32);
+    }
+    .lr-music-close-btn:active { transform: translateY(1px); }
+
+    /* ----- Full-width search input (always the sheet's top affordance) ----- */
+    .lr-music-search-input {
+      flex: 1 1 0;
+      min-width: 0;
+      width: 100%;
+      box-sizing: border-box;
+      padding: 13px 16px;
+      font-size: 15px;
+      line-height: 1.4;
+      color: #15171a;
+      background-color: #ffffff;
+      border: 1px solid #d6dbe1;
+      border-radius: 12px;
+      outline: none;
+      font-family: inherit;
+      transition: border-color 120ms ease, box-shadow 120ms ease;
+    }
+    .lr-music-search-input:focus {
+      border-color: #0a66c2;
+      box-shadow: 0 0 0 3px rgba(10,102,194,0.15);
+    }
+    .lr-music-search-input::placeholder {
+      color: #2e3133;
+      opacity: 1;
+    }
+
+    /* ----- The sheet body holds either the now-playing face or the search
+       overlay. flex:1 + min-height:0 so it fills the sheet and any inner
+       scroll region is bounded. ----- */
+    .lr-music-body {
+      flex: 1 1 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ----- Now-playing detail face (full art + transport + volume) ----- */
     .lr-music-np {
       flex: 1 1 0;
       min-height: 0;
-      position: relative;
       display: flex;
       flex-direction: column;
     }
@@ -301,7 +425,7 @@ if (
     /* Thicker, rounded progress line for the detail face (vs the bar's 3px). */
     .lr-music-np-progress {
       flex-shrink: 0;
-      margin: 14px 0 0 0;
+      margin: 16px 0 0 0;
     }
     .lr-music-np-progress-track {
       height: 5px;
@@ -325,61 +449,40 @@ if (
       color: #5f6368;
       font-variant-numeric: tabular-nums;
     }
-    /* Transport + volume + search-entry row, centred under the art. Reuses the
-       bar's .lr-music-ctrl pills. */
-    .lr-music-np-controls {
+
+    /* Transport row: prev / play-pause / next, centred under the art. */
+    .lr-music-np-transport {
       flex-shrink: 0;
-      margin: 16px 0 0 0;
+      margin: 18px 0 0 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+    }
+    /* Volume row sits on its OWN line below transport (don't cram horizontally
+       — use the vertical space). A small leading label anchors the pair. */
+    .lr-music-np-volume {
+      flex-shrink: 0;
+      margin: 12px 0 0 0;
       display: flex;
       align-items: center;
       justify-content: center;
       gap: 10px;
     }
-    .lr-music-np-controls-spacer {
-      width: 1px;
-      align-self: stretch;
-      margin: 4px 2px;
-      background-color: #e3e6ea;
+    .lr-music-np-volume-label {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #3c4043;
     }
 
-    /* The search panel overlays the art frame (same rounded inset) when search
-       is active, leaving the transport row beneath it untouched. */
-    .lr-music-search-panel {
-      position: absolute;
-      inset: 0;
-      z-index: 1;
-      background-color: #ffffff;
-      border-radius: 14px;
-      border: 1px solid #e3e6ea;
-      display: flex;
-      flex-direction: column;
-      padding: 14px;
-      box-shadow: 0 8px 24px rgba(15,23,42,0.14);
-    }
-
-    .lr-music-close-btn {
-      width: 30px;
-      height: 30px;
+    /* ----- Tabs (Songs / Playlists) — their OWN row, never beside the input ----- */
+    .lr-music-tabs {
       flex-shrink: 0;
-      background-color: transparent;
-      color: #d23a2c;
-      border: 1px solid #d23a2c;
-      border-radius: 50%;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      padding: 0;
-      transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+      display: flex;
+      gap: 10px;
     }
-    .lr-music-close-btn:hover {
-      background-color: #d23a2c;
-      color: #ffffff;
-      box-shadow: 0 2px 6px rgba(210,58,44,0.32);
-    }
-    .lr-music-close-btn:active { transform: translateY(1px); }
-
-    /* Mode toggle (Songs / Playlists) ----- */
     .lr-music-tab {
       flex: 1 1 0;
       min-width: 0;
@@ -400,72 +503,19 @@ if (
       border-color: #0a66c2;
     }
 
-    .lr-music-search-input {
-      flex: 1 1 0;
-      min-width: 0;
-      box-sizing: border-box;
-      padding: 12px 14px;
-      font-size: 15px;
-      line-height: 1.4;
-      color: #15171a;
-      background-color: #ffffff;
-      border: 1px solid #d6dbe1;
-      border-radius: 12px;
-      outline: none;
-      font-family: inherit;
-      transition: border-color 120ms ease, box-shadow 120ms ease;
-    }
-    .lr-music-search-input:focus {
-      border-color: #0a66c2;
-      box-shadow: 0 0 0 3px rgba(10,102,194,0.15);
-    }
-    .lr-music-search-input::placeholder {
-      color: #2e3133;
-      opacity: 1;
-    }
-
-    .lr-music-search-submit {
-      flex-shrink: 0;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 12px 18px;
-      background-color: #0a66c2;
-      color: #ffffff;
-      border: 1px solid #0a66c2;
-      border-radius: 999px;
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: background-color 120ms ease, border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
-    }
-    .lr-music-search-submit:hover {
-      background-color: #084e9c;
-      border-color: #084e9c;
-      box-shadow: 0 2px 6px rgba(10,102,194,0.32);
-    }
-    .lr-music-search-submit:active { transform: translateY(1px); }
-    .lr-music-search-submit:disabled {
-      background-color: #eef0f2;
-      color: #98a2ad;
-      border-color: #e3e6ea;
-      cursor: not-allowed;
-      box-shadow: none;
-    }
-
     /* ----- Result rows ----- */
     .lr-music-row {
       display: flex;
       align-items: center;
       gap: 12px;
-      padding: 10px;
+      padding: 12px;
       border: 1px solid #e3e6ea;
       border-radius: 12px;
       background-color: #ffffff;
     }
     .lr-music-row-art {
-      width: 46px;
-      height: 46px;
+      width: 48px;
+      height: 48px;
       flex-shrink: 0;
       border-radius: 8px;
       object-fit: cover;
@@ -503,7 +553,7 @@ if (
       flex-shrink: 0;
     }
 
-    /* Small pill actions on result rows (Enqueue / Play / Play All). */
+    /* Small pill actions on result rows (Queue / Play / Play All). */
     .lr-music-pill {
       display: inline-flex;
       align-items: center;
@@ -661,24 +711,6 @@ function VolUpIcon() {
     </svg>
   )
 }
-function SearchIcon() {
-  return (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="11" cy="11" r="7" />
-      <line x1="21" y1="21" x2="16.65" y2="16.65" />
-    </svg>
-  )
-}
 function NoteIcon() {
   return (
     <svg
@@ -719,6 +751,23 @@ function CloseIcon() {
     </svg>
   )
 }
+function ChevronUpIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <polyline points="18 15 12 9 6 15" />
+    </svg>
+  )
+}
 function ChevronLeftIcon() {
   return (
     <svg
@@ -737,15 +786,55 @@ function ChevronLeftIcon() {
   )
 }
 
-// --- Search overlay ---
+// --- Marquee ---
+//
+// Horizontally scrolls a single line of text only when it overflows its
+// container; otherwise it sits static. Measures track-vs-viewport width after
+// layout (and on every text change) and sets a negative-px CSS var the
+// keyframe ping-pongs across. Pure presentation — no data-layer coupling.
+function Marquee({ text, className }: { text: string; className: string }) {
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const trackRef = useRef<HTMLSpanElement>(null)
+  const [overflow, setOverflow] = useState(0)
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current
+    const track = trackRef.current
+    if (!viewport || !track) return
+    // +1px guard so a sub-pixel rounding difference doesn't trigger a 1px
+    // crawl on text that visually fits.
+    const diff = track.scrollWidth - viewport.clientWidth
+    setOverflow(diff > 1 ? diff : 0)
+  }, [text])
+
+  return (
+    <div
+      ref={viewportRef}
+      className={`lr-music-marquee ${className}`}
+      data-scroll={overflow > 0}
+      title={text}
+      style={
+        overflow > 0
+          ? ({ "--lr-marquee-shift": `-${overflow}px` } as React.CSSProperties)
+          : undefined
+      }
+    >
+      <span ref={trackRef} className="lr-music-marquee-track">
+        {text}
+      </span>
+    </div>
+  )
+}
+
+// --- Sheet ---
 
 type SearchTab = "songs" | "playlists"
 
-// The transport/volume control handlers the bar and the popover both fire. A
+// The transport/volume control handlers the bar and the sheet both fire. A
 // literal union (not a bare string) so the message name resolves against
 // Plasmo's MessagesMetadata and a typo can't slip a non-existent handler name
-// through. Declared here (above the overlay) because the popover's transport
-// row takes an onControl callback typed against it.
+// through. Declared here (above the sheet) because the sheet's transport row
+// takes an onControl callback typed against it.
 type ControlName =
   | "musicPrev"
   | "musicNext"
@@ -754,7 +843,7 @@ type ControlName =
   | "musicVolume"
 
 // Drill-in state: when the user opens a playlist, we fetch its songs and show
-// them with the same song-row affordances (Play / Enqueue). `null` = top-level
+// them with the same song-row affordances (Play / Queue). `null` = top-level
 // search results; a value = viewing that playlist's contents.
 interface PlaylistDrill {
   playlist: MusicPlaylistResult
@@ -778,12 +867,14 @@ type PlaylistContentsResp = {
 }
 type ActionResp = { ok: boolean; error?: string }
 
-// The expanded popover. Default face = the now-playing detail (full album art,
-// title/artists, progress, and the SAME transport/volume controls as the bar);
-// the search panel (tabs + input + results) overlays the art when search is
-// active. The bar passes the live track + a `sendControl` callback so the
-// popover's transport row drives the same handlers as the collapsed bar.
-function MusicSearchOverlay({
+// The expanded bottom sheet. TOP = a full-width search input. Default body =
+// the now-playing detail (full album art, title/artists, progress, transport,
+// and volume, all using the vertical space). When the input is FOCUSED or holds
+// a query, the search overlay (tabs on their own row, then a full-width
+// scrolling results list) covers the now-playing body. The bar passes the live
+// track + a `sendControl` callback so the sheet's transport/volume rows drive
+// the same handlers as the collapsed bar.
+function MusicSheet({
   track,
   isPlaying,
   positionMs,
@@ -802,13 +893,14 @@ function MusicSearchOverlay({
     { key: "extensionSecret", instance: localStore },
     ""
   )
-  // Which face is showing. false = now-playing detail (full art + transport);
-  // true = the search panel overlaying the art. Kept INSIDE the overlay so a
-  // suppression/blur on the bar can never tear down a half-typed query — same
-  // rationale as the bar owning `searchOpen` itself.
-  const [searchActive, setSearchActive] = useState(false)
   const [tab, setTab] = useState<SearchTab>("songs")
   const [query, setQuery] = useState("")
+  // Tracks input focus so the search overlay shows while the field is focused.
+  // Crucially the overlay's open-ness is `inputFocused || query has text` — so
+  // a blur with a non-empty query keeps the overlay up (the half-typed query is
+  // never torn down by an incidental blur). Only an explicit clear/close path
+  // empties the query and returns to the now-playing face.
+  const [inputFocused, setInputFocused] = useState(false)
   const [searching, setSearching] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [songResults, setSongResults] = useState<MusicSongResult[]>([])
@@ -818,24 +910,24 @@ function MusicSearchOverlay({
   const [drill, setDrill] = useState<PlaylistDrill | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Autofocus the search field whenever the search panel opens (popover
-  // convention). Because the overlay only closes on an explicit X / Escape —
-  // never on blur — a focused or half-typed query can't be destroyed by an
-  // incidental side-panel blur. Re-runs on each entry into the search face so
-  // toggling back into search re-focuses the input.
-  useEffect(() => {
-    if (searchActive) inputRef.current?.focus()
-  }, [searchActive])
+  // The search overlay is active whenever the input is focused OR carries a
+  // query. This is the single source of truth for which face shows — derived,
+  // not stored, so it can't drift from the input state that produced it.
+  const searchActive = inputFocused || query.trim().length > 0
 
-  // Escape: collapse the search panel back to the now-playing face if it's
-  // open, otherwise close the whole overlay. This is the second explicit-close
-  // affordance alongside the X button; there is deliberately NO backdrop-click
-  // or blur/visibilitychange close path.
+  // Escape: if the search overlay is up, collapse back to the now-playing face
+  // (blur + clear the query); otherwise close the whole sheet. This is the
+  // second explicit-close affordance alongside the X button. There is
+  // deliberately NO backdrop-click or blur close path for the SHEET, and a blur
+  // alone never tears the search overlay down (see searchActive).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return
       if (searchActive) {
-        setSearchActive(false)
+        setQuery("")
+        setDrill(null)
+        setError(null)
+        inputRef.current?.blur()
       } else {
         onClose()
       }
@@ -932,8 +1024,8 @@ function MusicSearchOverlay({
     setDrill(null)
   }
 
-  // Song rows carry TWO pills (Play + Enqueue); playlist rows carry ONE
-  // (Play All) plus a tappable body that drills into the contents.
+  // Song rows carry TWO pills (Queue + Play); playlist rows carry ONE (Play
+  // All) plus a tappable body that drills into the contents.
   const renderSongRow = (song: MusicSongResult) => (
     <div key={song.id} className="lr-music-row">
       {song.artUrl ? (
@@ -974,78 +1066,57 @@ function MusicSearchOverlay({
       ? Math.max(0, Math.min(100, (positionMs / durationMs) * 100))
       : 0
 
-  // The search panel that overlays the art frame when search is active. Tabs +
-  // input + scrollable results — the same affordances as before, now living on
-  // the search FACE of the popover rather than being the whole popover.
-  const searchPanel = (
-    <div className="lr-music-search-panel">
+  // The search overlay body: tabs on their OWN row, then a full-width scrolling
+  // results list below. Replaces the now-playing face when searchActive.
+  const searchOverlay = (
+    <div style={sheetStyles.searchOverlay}>
       {drill ? (
         <button
           type="button"
           className="lr-music-playlist-back"
-          style={{ alignSelf: "flex-start", marginBottom: "12px" }}
+          style={{ alignSelf: "flex-start", flexShrink: 0 }}
           onClick={() => setDrill(null)}
         >
           <ChevronLeftIcon />
           Back to results
         </button>
       ) : (
-        <>
-          <div style={overlayStyles.tabRow}>
-            <button
-              type="button"
-              className="lr-music-tab"
-              data-active={tab === "songs"}
-              onClick={() => switchTab("songs")}
-            >
-              Songs
-            </button>
-            <button
-              type="button"
-              className="lr-music-tab"
-              data-active={tab === "playlists"}
-              onClick={() => switchTab("playlists")}
-            >
-              Playlists
-            </button>
-          </div>
-          <form
-            style={overlayStyles.searchRow}
-            onSubmit={(e) => {
+        <div className="lr-music-tabs">
+          <button
+            type="button"
+            className="lr-music-tab"
+            data-active={tab === "songs"}
+            // Pointer-down (not click) so re-selecting the tab doesn't blur the
+            // search input first — keeps focus, keeps the overlay up.
+            onMouseDown={(e) => {
               e.preventDefault()
-              void runSearch()
+              switchTab("songs")
             }}
           >
-            <input
-              ref={inputRef}
-              className="lr-music-search-input"
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={
-                tab === "songs" ? "Search songs…" : "Search playlists…"
-              }
-              aria-label="Search query"
-            />
-            <button
-              type="submit"
-              className="lr-music-search-submit"
-              disabled={searching || !query.trim()}
-            >
-              {searching ? "…" : "Search"}
-            </button>
-          </form>
-        </>
+            Songs
+          </button>
+          <button
+            type="button"
+            className="lr-music-tab"
+            data-active={tab === "playlists"}
+            onMouseDown={(e) => {
+              e.preventDefault()
+              switchTab("playlists")
+            }}
+          >
+            Playlists
+          </button>
+        </div>
       )}
 
-      {error && <p style={overlayStyles.error}>{error}</p>}
+      {error && <p style={sheetStyles.error}>{error}</p>}
 
-      <div style={overlayStyles.results}>
+      <div style={sheetStyles.results}>
         {searching && (
-          // Explicit pane-level feedback. The submit button shows "…" too,
-          // but a playlist drill-in hides that button entirely, so without
-          // this the results pane is a blank void while a fetch is in flight.
-          <p style={overlayStyles.empty}>Searching…</p>
+          // Explicit pane-level feedback. A playlist drill-in has no submit
+          // button, so without this the results pane is a blank void while a
+          // fetch is in flight.
+          <p style={sheetStyles.empty}>Searching…</p>
         )}
         {searching
           ? null
@@ -1053,14 +1124,16 @@ function MusicSearchOverlay({
           ? drill.songs.length > 0
             ? drill.songs.map(renderSongRow)
             : (
-                <p style={overlayStyles.empty}>This playlist is empty.</p>
+                <p style={sheetStyles.empty}>This playlist is empty.</p>
               )
           : tab === "songs"
             ? songResults.length > 0
               ? songResults.map(renderSongRow)
               : (
-                  <p style={overlayStyles.empty}>
-                    Search for a song to play or queue it.
+                  <p style={sheetStyles.empty}>
+                    {query.trim()
+                      ? "Press Enter to search songs."
+                      : "Search for a song to play or queue it."}
                   </p>
                 )
             : playlistResults.length > 0
@@ -1084,7 +1157,7 @@ function MusicSearchOverlay({
                       className="lr-music-row-meta"
                       role="button"
                       tabIndex={0}
-                      style={overlayStyles.playlistOpen}
+                      style={sheetStyles.playlistOpen}
                       onClick={() => void openPlaylist(pl)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
@@ -1114,10 +1187,99 @@ function MusicSearchOverlay({
                   </div>
                 ))
               : (
-                  <p style={overlayStyles.empty}>
-                    Search for a playlist to play it.
+                  <p style={sheetStyles.empty}>
+                    {query.trim()
+                      ? "Press Enter to search playlists."
+                      : "Search for a playlist to play it."}
                   </p>
                 )}
+      </div>
+    </div>
+  )
+
+  // The now-playing detail face: full art, title/artist, progress, transport,
+  // and volume — laid out down the vertical space. Shown when search isn't
+  // active.
+  const nowPlayingFace = (
+    <div className="lr-music-np">
+      <div className="lr-music-np-art-frame">
+        {track && track.artUrl ? (
+          <img className="lr-music-np-art" src={track.artUrl} alt="" />
+        ) : (
+          <div className="lr-music-np-art-empty">
+            <NoteIcon />
+          </div>
+        )}
+      </div>
+
+      <div className="lr-music-np-meta">
+        <p className="lr-music-np-title">
+          {track ? track.title : "Nothing playing"}
+        </p>
+        <p className="lr-music-np-artist">{track ? track.artists : ""}</p>
+      </div>
+
+      <div className="lr-music-np-progress">
+        <div className="lr-music-np-progress-track" aria-hidden="true">
+          <div
+            className="lr-music-np-progress-fill"
+            style={{ width: `${detailPct}%` }}
+          />
+        </div>
+        <div className="lr-music-np-times">
+          <span>{formatClock(positionMs)}</span>
+          <span>{formatClock(durationMs)}</span>
+        </div>
+      </div>
+
+      <div className="lr-music-np-transport">
+        <button
+          type="button"
+          className="lr-music-ctrl"
+          onClick={() => onControl("musicPrev")}
+          disabled={!track}
+          aria-label="Previous track"
+        >
+          <PrevIcon />
+        </button>
+        <button
+          type="button"
+          className="lr-music-ctrl lr-music-ctrl--primary"
+          onClick={() => onControl(isPlaying ? "musicPause" : "musicResume")}
+          disabled={!track}
+          aria-label={isPlaying ? "Pause" : "Play"}
+        >
+          {isPlaying ? <PauseIcon /> : <PlayIcon />}
+        </button>
+        <button
+          type="button"
+          className="lr-music-ctrl"
+          onClick={() => onControl("musicNext")}
+          disabled={!track}
+          aria-label="Next track"
+        >
+          <NextIcon />
+        </button>
+      </div>
+
+      <div className="lr-music-np-volume">
+        <span className="lr-music-np-volume-label">Volume</span>
+        <button
+          type="button"
+          className="lr-music-ctrl"
+          onClick={() => onControl("musicVolume", { dir: "down" })}
+          aria-label="Volume down"
+        >
+          <VolDownIcon />
+        </button>
+        <button
+          type="button"
+          className="lr-music-ctrl"
+          onClick={() => onControl("musicVolume", { dir: "up" })}
+          aria-label="Volume up"
+        >
+          <VolUpIcon />
+        </button>
       </div>
     </div>
   )
@@ -1129,9 +1291,9 @@ function MusicSearchOverlay({
       aria-modal="true"
       aria-label="Now playing"
     >
-      <div className="lr-music-popover">
-        <header style={overlayStyles.header}>
-          <h2 style={overlayStyles.title}>
+      <div className="lr-music-sheet">
+        <header className="lr-music-sheet-head">
+          <h2 className="lr-music-sheet-title">
             {searchActive
               ? drill
                 ? drill.playlist.title
@@ -1140,112 +1302,39 @@ function MusicSearchOverlay({
           </h2>
           <button
             type="button"
-            onClick={searchActive ? () => setSearchActive(false) : onClose}
+            onClick={onClose}
             className="lr-music-close-btn"
-            aria-label={searchActive ? "Back to now playing" : "Close now playing"}
+            aria-label="Close now playing"
           >
             <CloseIcon />
           </button>
         </header>
 
-        {/* Now-playing detail FACE. The full album art + the same transport /
-            volume controls as the collapsed bar; the search panel overlays the
-            art frame (absolute, same rounded inset) when search is active. */}
-        <div className="lr-music-np">
-          <div className="lr-music-np-art-frame">
-            {track && track.artUrl ? (
-              <img className="lr-music-np-art" src={track.artUrl} alt="" />
-            ) : (
-              <div className="lr-music-np-art-empty">
-                <NoteIcon />
-              </div>
-            )}
-            {searchActive && searchPanel}
-          </div>
+        {/* Full-width search input — always the sheet's top affordance, NOT
+            constrained to the album-art column. Focusing it (or typing) raises
+            the search overlay over the now-playing body. */}
+        <input
+          ref={inputRef}
+          className="lr-music-search-input"
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onFocus={() => setInputFocused(true)}
+          onBlur={() => setInputFocused(false)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault()
+              void runSearch()
+            }
+          }}
+          placeholder={
+            tab === "songs" ? "Search songs…" : "Search playlists…"
+          }
+          aria-label="Search music"
+        />
 
-          <div className="lr-music-np-meta">
-            <p className="lr-music-np-title">
-              {track ? track.title : "Nothing playing"}
-            </p>
-            <p className="lr-music-np-artist">{track ? track.artists : ""}</p>
-          </div>
-
-          <div className="lr-music-np-progress">
-            <div className="lr-music-np-progress-track" aria-hidden="true">
-              <div
-                className="lr-music-np-progress-fill"
-                style={{ width: `${detailPct}%` }}
-              />
-            </div>
-            <div className="lr-music-np-times">
-              <span>{formatClock(positionMs)}</span>
-              <span>{formatClock(durationMs)}</span>
-            </div>
-          </div>
-
-          <div className="lr-music-np-controls">
-            <button
-              type="button"
-              className="lr-music-ctrl"
-              onClick={() => onControl("musicPrev")}
-              disabled={!track}
-              aria-label="Previous track"
-            >
-              <PrevIcon />
-            </button>
-            <button
-              type="button"
-              className="lr-music-ctrl lr-music-ctrl--primary"
-              onClick={() => onControl(isPlaying ? "musicPause" : "musicResume")}
-              disabled={!track}
-              aria-label={isPlaying ? "Pause" : "Play"}
-            >
-              {isPlaying ? <PauseIcon /> : <PlayIcon />}
-            </button>
-            <button
-              type="button"
-              className="lr-music-ctrl"
-              onClick={() => onControl("musicNext")}
-              disabled={!track}
-              aria-label="Next track"
-            >
-              <NextIcon />
-            </button>
-            <span
-              className="lr-music-np-controls-spacer"
-              aria-hidden="true"
-            />
-            <button
-              type="button"
-              className="lr-music-ctrl"
-              onClick={() => onControl("musicVolume", { dir: "down" })}
-              aria-label="Volume down"
-            >
-              <VolDownIcon />
-            </button>
-            <button
-              type="button"
-              className="lr-music-ctrl"
-              onClick={() => onControl("musicVolume", { dir: "up" })}
-              aria-label="Volume up"
-            >
-              <VolUpIcon />
-            </button>
-            <span
-              className="lr-music-np-controls-spacer"
-              aria-hidden="true"
-            />
-            <button
-              type="button"
-              className="lr-music-ctrl"
-              data-active={searchActive}
-              onClick={() => setSearchActive((s) => !s)}
-              aria-label={searchActive ? "Hide search" : "Search music"}
-              aria-pressed={searchActive}
-            >
-              <SearchIcon />
-            </button>
-          </div>
+        <div className="lr-music-body">
+          {searchActive ? searchOverlay : nowPlayingFace}
         </div>
       </div>
     </div>
@@ -1262,11 +1351,11 @@ export function MusicBar() {
     { key: "extensionSecret", instance: localStore },
     ""
   )
-  // The expanded search overlay's open/closed state is the bar's OWN source of
-  // truth — decoupled from `suppressed` so a side-panel blur (which flips
-  // suppression) can never tear down a mid-input search. It only closes via
-  // the overlay's explicit X / Escape.
-  const [searchOpen, setSearchOpen] = useState(false)
+  // The expanded sheet's open/closed state is the bar's OWN source of truth —
+  // decoupled from `suppressed` so a side-panel blur (which flips suppression)
+  // can never tear down a mid-input search. It only closes via the sheet's
+  // explicit X / Escape.
+  const [sheetOpen, setSheetOpen] = useState(false)
 
   const snapshot = slot?.snapshot ?? null
   const status = slot?.status ?? "idle"
@@ -1281,8 +1370,8 @@ export function MusicBar() {
 
   // The 4Hz progress clock lives HERE, in the bar subtree, not in the
   // orchestrator that owns the WS subscription — so playback re-renders only
-  // the bar. Gated on the bar painting OR the expanded popover being open (the
-  // popover renders its own live progress, so the clock must keep ticking even
+  // the bar. Gated on the bar painting OR the expanded sheet being open (the
+  // sheet renders its own live progress, so the clock must keep ticking even
   // when the collapsed bar chrome is suppressed beneath it), so an idle/empty
   // surface burns no interval. ALSO gated on a live (`open`) socket: a dropped
   // connection retains the last snapshot, so without this the tick would keep
@@ -1291,7 +1380,7 @@ export function MusicBar() {
   // (Pause already freezes via the anchor's isPlaying flag.)
   const displayPositionMs = useInterpolatedPosition(
     snapshot,
-    (barVisible || searchOpen) && status === "open"
+    (barVisible || sheetOpen) && status === "open"
   )
 
   // CSS-var height seam. It writes BAR_HEIGHT_PX when the bar is painting and
@@ -1308,14 +1397,14 @@ export function MusicBar() {
     }
   }, [barVisible])
 
-  // If the bar stops painting while the overlay is open, the overlay is a
+  // If the bar stops painting while the sheet is open, the sheet is a
   // standalone fixed layer (z above the bar) and can stay — it persists across
   // mode switches now that the bar is cross-mode chrome (the slot is present on
   // every non-editor surface). A genuine slot-loss (no provider at all — e.g. a
   // future template-editor surface) still drops it, since there's no music
   // surface to return to.
   useEffect(() => {
-    if (!slot) setSearchOpen(false)
+    if (!slot) setSheetOpen(false)
   }, [slot])
 
   const isPlaying = snapshot?.isPlaying ?? false
@@ -1333,17 +1422,16 @@ export function MusicBar() {
     }).catch(() => {})
   }
 
-  // The returned root is ALWAYS a Fragment whose SECOND child is the search
-  // overlay, so the overlay keeps a stable position/identity across every
-  // re-render of this instance. Conditionally returning a bare overlay from a
-  // `!barVisible` early-return would change the root element type
-  // (Fragment → MusicSearchOverlay), which React reconciles as a full
-  // unmount+remount — wiping the overlay's half-typed query and results. That
-  // is exactly the focus-loss-must-not-destroy-input invariant, and the bar's
-  // own paint state (a `track: null` snapshot between songs flips hasTrack, a
-  // transient suppression flips `suppressed`) must not tear the overlay down.
-  // So we gate ONLY the bar chrome on barVisible and render the overlay
-  // independently while a slot exists.
+  // The returned root is ALWAYS a Fragment whose SECOND child is the expanded
+  // sheet, so the sheet keeps a stable position/identity across every re-render
+  // of this instance. Conditionally returning a bare sheet from a `!barVisible`
+  // early-return would change the root element type (Fragment → MusicSheet),
+  // which React reconciles as a full unmount+remount — wiping the sheet's
+  // half-typed query and results. That is exactly the focus-loss-must-not-
+  // destroy-input invariant, and the bar's own paint state (a `track: null`
+  // snapshot between songs flips hasTrack, a transient suppression flips
+  // `suppressed`) must not tear the sheet down. So we gate ONLY the bar chrome
+  // on barVisible and render the sheet independently while a slot exists.
   return (
     <>
       {barVisible && (
@@ -1363,11 +1451,14 @@ export function MusicBar() {
             </div>
           )}
 
+          {/* Title + artist marquee-scroll horizontally when they overflow,
+              static when they fit. */}
           <div className="lr-music-meta">
-            <p className="lr-music-title">{track?.title}</p>
-            <p className="lr-music-artist">{track?.artists}</p>
+            <Marquee className="lr-music-title" text={track?.title ?? ""} />
+            <Marquee className="lr-music-artist" text={track?.artists ?? ""} />
           </div>
 
+          {/* Transport only — volume + search moved into the expanded sheet. */}
           <div style={barStyles.controls}>
             <button
               type="button"
@@ -1397,44 +1488,26 @@ export function MusicBar() {
             </button>
           </div>
 
-          <div style={barStyles.controls}>
-            <button
-              type="button"
-              className="lr-music-ctrl"
-              onClick={() => sendControl("musicVolume", { dir: "down" })}
-              aria-label="Volume down"
-            >
-              <VolDownIcon />
-            </button>
-            <button
-              type="button"
-              className="lr-music-ctrl"
-              onClick={() => sendControl("musicVolume", { dir: "up" })}
-              aria-label="Volume up"
-            >
-              <VolUpIcon />
-            </button>
-          </div>
-
+          {/* Smaller-than-transport expand chevron — opens the bottom sheet. */}
           <button
             type="button"
-            className="lr-music-ctrl"
-            onClick={() => setSearchOpen(true)}
-            aria-label="Search music"
+            className="lr-music-expand"
+            onClick={() => setSheetOpen(true)}
+            aria-label="Expand now playing"
           >
-            <SearchIcon />
+            <ChevronUpIcon />
           </button>
         </div>
       )}
 
-      {slot && searchOpen && (
-        <MusicSearchOverlay
+      {slot && sheetOpen && (
+        <MusicSheet
           track={track}
           isPlaying={isPlaying}
           positionMs={positionMs}
           durationMs={durationMs}
           onControl={sendControl}
-          onClose={() => setSearchOpen(false)}
+          onClose={() => setSheetOpen(false)}
         />
       )}
     </>
@@ -1450,45 +1523,25 @@ const barStyles: Record<string, React.CSSProperties> = {
   }
 }
 
-const overlayStyles: Record<string, React.CSSProperties> = {
-  header: {
+const sheetStyles: Record<string, React.CSSProperties> = {
+  // The search overlay column inside the sheet body: tabs/back row (flex-
+  // shrink:0), optional error, then the scrolling results list.
+  searchOverlay: {
+    flex: "1 1 0",
+    minHeight: 0,
     display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "12px",
-    margin: "0 0 16px 0"
-  },
-  title: {
-    margin: 0,
-    fontSize: "19px",
-    fontWeight: 700,
-    lineHeight: 1.1,
-    color: "#15171a",
-    letterSpacing: "-0.01em",
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis"
-  },
-  tabRow: {
-    display: "flex",
-    gap: "10px",
-    margin: "0 0 14px 0"
-  },
-  searchRow: {
-    display: "flex",
-    alignItems: "stretch",
-    gap: "10px",
-    margin: "0 0 14px 0"
+    flexDirection: "column",
+    gap: "14px"
   },
   error: {
-    margin: "0 0 12px 0",
+    margin: 0,
     fontSize: "13px",
     fontWeight: 500,
     color: "#a82a20",
     lineHeight: 1.3
   },
   // The results list is the ONLY scroll child — flex-grow + min-height:0 so
-  // the popover stays fixed-height and only this column scrolls.
+  // the sheet stays fixed-height and only this column scrolls.
   results: {
     flex: "1 1 0",
     minHeight: 0,
@@ -1499,7 +1552,7 @@ const overlayStyles: Record<string, React.CSSProperties> = {
     paddingRight: "2px"
   },
   empty: {
-    margin: "8px 0 0 0",
+    margin: "4px 0 0 0",
     fontSize: "14px",
     fontWeight: 400,
     color: "#5f6368",
