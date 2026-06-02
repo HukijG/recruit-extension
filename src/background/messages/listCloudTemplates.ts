@@ -5,34 +5,35 @@ import {
   buildMiddlewareUrl,
   NotAuthenticatedError
 } from "~background/auth-runtime"
+import type { SmsTemplate } from "~lib/types"
 
-const ROUTE_PATH = "/candidate-details"
+// GET /sms-templates — used by the one-shot hydration hook
+// (useTemplateHydration) when local storage is empty. The worker scopes
+// templates by JWT `sub` so no body / no path param is needed.
 
-const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
-  const { profileUrl } = req.body ?? {}
-  if (!profileUrl || typeof profileUrl !== "string") {
-    res.send({ ok: false, error: "Missing profileUrl" })
-    return
-  }
+const ROUTE_PATH = "/sms-templates"
+
+const handler: PlasmoMessaging.MessageHandler = async (_req, res) => {
   try {
     const resp = await authFetch(buildMiddlewareUrl(ROUTE_PATH), {
-      method: "POST",
-      body: JSON.stringify({ profileUrl })
+      method: "GET"
     })
     if (!resp.ok) {
       let errorBody = ""
-      try { errorBody = await resp.text() } catch {}
+      try {
+        errorBody = await resp.text()
+      } catch {}
       res.send({
         ok: false,
         error: `${resp.status} ${resp.statusText}${errorBody ? ": " + errorBody : ""}`
       })
       return
     }
-    const data = await resp.json()
-    res.send({ ok: true, data })
+    const data = (await resp.json()) as { templates?: SmsTemplate[] }
+    res.send({ ok: true, templates: data.templates ?? [] })
   } catch (err) {
     if (err instanceof NotAuthenticatedError) {
-      res.send({ ok: false, error: "Session expired — please sign in again" })
+      res.send({ ok: false, error: "not_authenticated" })
       return
     }
     res.send({ ok: false, error: (err as Error)?.message ?? "Network error" })

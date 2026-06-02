@@ -22,3 +22,4 @@ tsconfig.tsbuildinfo
 # mobile/ subapp is on npm so its lockfile is exempted explicitly.
 package-lock.json
 !mobile/package-lock.json
+/key.pem

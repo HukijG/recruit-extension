@@ -1,52 +1,41 @@
 import type { PlasmoMessaging } from "@plasmohq/messaging"
-import { Storage } from "@plasmohq/storage"
 
-const MIDDLEWARE_URL = process.env.PLASMO_PUBLIC_MIDDLEWARE_URL
+import {
+  authFetch,
+  buildMiddlewareUrl,
+  NotAuthenticatedError
+} from "~background/auth-runtime"
+
+const ROUTE_PATH = "/candidates"
 
 const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
-  if (!MIDDLEWARE_URL) {
-    res.send({ ok: false, error: "Middleware URL not configured at build time. Rebuild with .env.production set." })
-    return
-  }
-
-  const { candidates, secret } = req.body ?? {}
-
+  const { candidates } = req.body ?? {}
   if (!candidates?.length) {
     res.send({ ok: false, error: "Missing candidates" })
     return
   }
-
-  const localStore = new Storage({ area: "local" })
-  const consultantFirstName =
-    (await localStore.get<string>("consultantFirstName")) ?? ""
-
-  const url = `${MIDDLEWARE_URL.replace(/\/+$/, "")}/candidates`
-
-  const headers: Record<string, string> = { "Content-Type": "application/json" }
-  if (secret) headers["X-Extension-Token"] = secret
-
   try {
-    const resp = await fetch(url, {
+    const resp = await authFetch(buildMiddlewareUrl(ROUTE_PATH), {
       method: "POST",
-      headers,
-      body: JSON.stringify({ consultantFirstName, candidates })
+      body: JSON.stringify({ candidates })
     })
-
     if (!resp.ok) {
       let errorBody = ""
-      try {
-        errorBody = await resp.text()
-      } catch {}
-      const msg = `${resp.status} ${resp.statusText}${errorBody ? ": " + errorBody : ""}`
-      res.send({ ok: false, error: msg })
+      try { errorBody = await resp.text() } catch {}
+      res.send({
+        ok: false,
+        error: `${resp.status} ${resp.statusText}${errorBody ? ": " + errorBody : ""}`
+      })
       return
     }
-
     const data = await resp.json()
     res.send({ ok: true, data })
-  } catch (err: any) {
-    const msg = err?.message ?? "Network error"
-    res.send({ ok: false, error: msg })
+  } catch (err) {
+    if (err instanceof NotAuthenticatedError) {
+      res.send({ ok: false, error: "Session expired — please sign in again" })
+      return
+    }
+    res.send({ ok: false, error: (err as Error)?.message ?? "Network error" })
   }
 }
 

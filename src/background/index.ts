@@ -34,9 +34,37 @@ async function migrateSyncToLocal() {
   }
 }
 
+// One-shot migration v2: wipe identity keys made obsolete by the OAuth flip.
+// Removes the legacy extensionSecret + consultantFirstName fields and the
+// dialpadUserContext cache entries that were keyed by consultantFirstName.
+// Idempotent via migration_v2_done flag.
+async function migrateV2WipeStaleKeys() {
+  const localStore = new Storage({ area: "local" })
+  try {
+    const done = await localStore.get("migration_v2_done")
+    if (done) return
+
+    await localStore.remove("extensionSecret")
+    await localStore.remove("consultantFirstName")
+
+    const all = (await (chrome.storage.local.get(null) as unknown as Promise<Record<string, unknown>>)) ?? {}
+    const orphans = Object.keys(all).filter((k) => k.startsWith("dialpadUserContext:"))
+    if (orphans.length) await chrome.storage.local.remove(orphans)
+
+    const syncStore = new Storage({ area: "sync" })
+    await syncStore.remove("extensionSecret").catch(() => {})
+    await syncStore.remove("consultantFirstName").catch(() => {})
+
+    await localStore.set("migration_v2_done", true)
+  } catch {
+    // If anything fails, leave the flag unset so onInstalled retries on next update.
+  }
+}
+
 chrome.runtime.onInstalled.addListener(async (details) => {
   if (details.reason !== "install" && details.reason !== "update") return
   await migrateSyncToLocal()
+  await migrateV2WipeStaleKeys()
 })
 
 // --- URL watcher: drives sidepanel mode ---

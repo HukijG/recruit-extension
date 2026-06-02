@@ -433,10 +433,6 @@ export function TextPopover({
     { key: TEMPLATES_STORAGE_KEY, instance: localStore },
     []
   )
-  const [extensionSecret] = useStorage<string>(
-    { key: "extensionSecret", instance: localStore },
-    ""
-  )
   const templates = [...(stored ?? [])].sort((a, b) =>
     b.updatedAt.localeCompare(a.updatedAt)
   )
@@ -505,8 +501,7 @@ export function TextPopover({
       body: {
         phoneNumber,
         callerAliasId,
-        text,
-        secret: extensionSecret
+        text
       }
     }).catch(
       (err): SmsResp => ({

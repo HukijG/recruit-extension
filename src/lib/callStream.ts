@@ -1,7 +1,6 @@
-import { useStorage } from "@plasmohq/storage/hook"
+import { sendToBackground } from "@plasmohq/messaging"
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import { localStore } from "~lib/constants"
 import type { CallStreamState } from "~lib/types"
 
 // Polling-based call-state hook against POST /extension-call-status.
@@ -29,9 +28,6 @@ import type { CallStreamState } from "~lib/types"
 // TTL discards stale state from previous days; per-candidate phone-match
 // logic in CallButton means the persisted state is only surfaced on the
 // right candidate page.
-
-const MIDDLEWARE_URL = process.env.PLASMO_PUBLIC_MIDDLEWARE_URL
-const ROUTE_PATH = "/extension-call-status"
 
 // 500ms cadence — handover's recommended sweet spot. 250ms minimum (no
 // benefit, burns quota); 1s maximum (sluggish hangup detection).
@@ -104,16 +100,18 @@ export interface UseCallStreamReturn {
 
 type WireState = "in_progress" | "ended"
 
-export function useCallStream(): UseCallStreamReturn {
-  const [consultantFirstName] = useStorage<string>(
-    { key: "consultantFirstName", instance: localStore },
-    ""
-  )
-  const [extensionSecret] = useStorage<string>(
-    { key: "extensionSecret", instance: localStore },
-    ""
-  )
+interface ExtensionCallStatusOk {
+  ok: true
+  data: { state?: WireState }
+}
+interface ExtensionCallStatusErr {
+  ok: false
+  status?: number
+  transient?: boolean
+}
+type ExtensionCallStatusResp = ExtensionCallStatusOk | ExtensionCallStatusErr
 
+export function useCallStream(): UseCallStreamReturn {
   const [state, setState] = useState<CallStreamState>(() => {
     const persisted = readPersisted()
     if (persisted) {
@@ -129,10 +127,13 @@ export function useCallStream(): UseCallStreamReturn {
 
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const inFlightRef = useRef<AbortController | null>(null)
-  // setInterval captures poll at arming time, but poll's identity changes
-  // when consultantFirstName / extensionSecret resolve from useStorage. The
-  // ref lets the interval call the LATEST poll without rearming the timer.
+  // Boolean coalescing flag. sendToBackground can't be aborted the way a
+  // fetch+AbortController could; if a poll is in flight, skip new ones.
+  // On unmount the interval is cleared and any in-flight messaging just
+  // completes on its own (the response is dropped, nothing leaks).
+  const inFlightRef = useRef(false)
+  // setInterval captures poll at arming time; the ref lets the interval
+  // call the LATEST poll closure without rearming the timer.
   const pollRef = useRef<() => Promise<void>>(async () => {})
 
   const clearWatchdog = useCallback(() => {
@@ -147,10 +148,9 @@ export function useCallStream(): UseCallStreamReturn {
       clearInterval(intervalRef.current)
       intervalRef.current = null
     }
-    if (inFlightRef.current) {
-      inFlightRef.current.abort()
-      inFlightRef.current = null
-    }
+    // No abort path — sendToBackground is not abortable. Any in-flight
+    // messaging finishes on its own; inFlightRef resets in the poll's
+    // finally block. The interval being cleared is enough.
   }, [])
 
   // Apply a wire response. in_progress flips calling→active and clears the
@@ -175,73 +175,50 @@ export function useCallStream(): UseCallStreamReturn {
     // calling → ignore; idle → unreachable.
   }, [clearWatchdog, stopPolling])
 
-  // The poll itself. Direct fetch from the hook (matches the prior SSE
-  // pattern; avoids 180-per-call background-messaging round trips).
+  // The poll itself. Dispatches to the background handler so the access
+  // token stays in the SW. Status-code-aware behavior moves into the
+  // handler's response envelope: `transient: false` = terminal (stop),
+  // `transient: true` = retry on next tick.
   const poll = useCallback(async () => {
-    if (!MIDDLEWARE_URL || !consultantFirstName) return
     // Coalesce — never run two polls in flight. The interval may fire while
     // the previous request hasn't returned; in that case skip.
     if (inFlightRef.current) return
-
-    const controller = new AbortController()
-    inFlightRef.current = controller
-
+    inFlightRef.current = true
     try {
-      const url = `${MIDDLEWARE_URL.replace(/\/+$/, "")}${ROUTE_PATH}`
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json"
-      }
-      if (extensionSecret) headers["X-Extension-Token"] = extensionSecret
+      const resp = (await sendToBackground<unknown, ExtensionCallStatusResp>({
+        name: "extensionCallStatus"
+      })) as ExtensionCallStatusResp
 
-      const resp = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ consultantFirstName }),
-        signal: controller.signal
-      })
-
-      // Auth/registry failures are terminal — keep polling won't help. Log and
-      // stop so the user isn't silently spamming 401/403.
-      if (resp.status === 401 || resp.status === 403) {
-        console.warn(
-          `[callStream] poll ${resp.status} — stopping (config issue)`
-        )
-        stopPolling()
-        if (stateRef.current.status !== "idle") {
-          clearWatchdog()
-          setState({ status: "idle", phoneNumber: null })
+      if (resp.ok === false) {
+        // Terminal auth/registry failure: stop the loop. The LoginScreen
+        // takes over via <RequireAuth>; we just stop spamming.
+        if (resp.transient === false) {
+          console.warn(
+            `[callStream] poll ${resp.status ?? "?"} — stopping (config issue)`
+          )
+          stopPolling()
+          if (stateRef.current.status !== "idle") {
+            clearWatchdog()
+            setState({ status: "idle", phoneNumber: null })
+          }
+          return
         }
+        // Transient (500/502/network blip) → keep loop alive; no backoff
+        // (500ms is already polite). Next interval tick retries.
         return
       }
 
-      // Transient discovery / upstream failures — handover says keep polling;
-      // don't backoff (500ms is already polite). Next interval tick retries.
-      if (resp.status === 500 || resp.status === 502) return
-
-      if (!resp.ok) {
-        console.warn(
-          `[callStream] poll unexpected ${resp.status} — keeping loop alive`
-        )
-        return
+      if (resp.data.state === "in_progress" || resp.data.state === "ended") {
+        applyWireState(resp.data.state)
       }
-
-      const body = (await resp.json().catch(() => null)) as {
-        state?: WireState
-      } | null
-      if (body?.state === "in_progress" || body?.state === "ended") {
-        applyWireState(body.state)
-      }
-    } catch (err: any) {
-      // Aborted = unmount/state-cleared; not an error.
-      if (err?.name === "AbortError") return
-      // Network blip — keep loop alive.
-      console.warn("[callStream] poll error:", err?.message ?? err)
+    } catch (err) {
+      // sendToBackground rejection — treat as transient. Network blip,
+      // SW restart, or messaging hiccup; keep loop alive.
+      console.warn("[callStream] poll error:", (err as Error)?.message ?? err)
     } finally {
-      if (inFlightRef.current === controller) {
-        inFlightRef.current = null
-      }
+      inFlightRef.current = false
     }
-  }, [applyWireState, clearWatchdog, consultantFirstName, extensionSecret, stopPolling])
+  }, [applyWireState, clearWatchdog, stopPolling])
 
   // Keep pollRef pointing at the freshest poll closure so the interval
   // lambda below always calls the current one, regardless of which deps

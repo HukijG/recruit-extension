@@ -1,9 +1,9 @@
 import { sendToBackground } from "@plasmohq/messaging"
-import { useStorage } from "@plasmohq/storage/hook"
 import Papa from "papaparse"
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import { localStore } from "~lib/constants"
+import { useAuth } from "~auth/AuthProvider"
+import { welcomeStyles } from "~lib/styles/welcome"
 import type {
   AddToJobResponse,
   Candidate,
@@ -148,13 +148,12 @@ export function buildPayload(m: MatchedCandidate): CandidatePayload {
 }
 
 export async function sendCandidatesBatch(
-  candidates: CandidatePayload[],
-  secret?: string
+  candidates: CandidatePayload[]
 ): Promise<{ ok: boolean; data?: SendCandidatesResponse; error?: string }> {
   try {
     const result = await sendToBackground({
       name: "sendCandidates",
-      body: { candidates, secret }
+      body: { candidates }
     })
     return result ?? { ok: false, error: "No response from background" }
   } catch (err: any) {
@@ -165,179 +164,18 @@ export async function sendCandidatesBatch(
 
 export async function addCandidatesToJob(
   rfIds: number[],
-  jobId: number,
-  secret?: string
+  jobId: number
 ): Promise<{ ok: boolean; data?: AddToJobResponse; error?: string }> {
   try {
     const result = await sendToBackground({
       name: "addToJob",
-      body: { rfIds, jobId, secret }
+      body: { rfIds, jobId }
     })
     return result ?? { ok: false, error: "No response from background" }
   } catch (err: any) {
     const msg = err?.message ?? "Add to job failed"
     return { ok: false, error: msg }
   }
-}
-
-// --- Greeting heading with inline editable name ---
-
-export function EditableNameHeading({
-  name,
-  onChange
-}: {
-  name: string
-  onChange: (next: string) => void
-}) {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState("")
-  const [nameHover, setNameHover] = useState(false)
-  const [inputFocus, setInputFocus] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  const startEdit = () => {
-    setDraft(name)
-    setEditing(true)
-    setTimeout(() => inputRef.current?.focus(), 0)
-  }
-
-  const confirmEdit = () => {
-    const trimmed = draft.trim()
-    if (!trimmed) {
-      // empty submission reverts to the prior name with no change
-      setEditing(false)
-      return
-    }
-    onChange(trimmed)
-    setEditing(false)
-  }
-
-  const cancelEdit = () => {
-    setEditing(false)
-    setDraft("")
-  }
-
-  if (editing) {
-    return (
-      <h1 style={styles.greetingTitle}>
-        <span>Hi, </span>
-        <input
-          ref={inputRef}
-          type="text"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") confirmEdit()
-            else if (e.key === "Escape") cancelEdit()
-          }}
-          onFocus={() => setInputFocus(true)}
-          onBlur={() => {
-            setInputFocus(false)
-            confirmEdit()
-          }}
-          style={{
-            ...styles.greetingNameInput,
-            borderBottomColor: inputFocus ? "#0a66c2" : "#9bb6dc"
-          }}
-        />
-        <span>!</span>
-      </h1>
-    )
-  }
-
-  return (
-    <h1 style={styles.greetingTitle}>
-      <span>Hi, </span>
-      <span
-        onClick={startEdit}
-        onMouseEnter={() => setNameHover(true)}
-        onMouseLeave={() => setNameHover(false)}
-        style={{
-          ...styles.greetingName,
-          backgroundColor: nameHover ? "#c5d8f1" : "#e8f0fe"
-        }}
-        title="Click to edit your name">
-        {name}
-      </span>
-      <span>!</span>
-    </h1>
-  )
-}
-
-// --- First-time setup greeting (when consultant name is unset) ---
-
-export function NameSetupGreeting({
-  onSetName
-}: {
-  onSetName: (name: string) => void
-}) {
-  const [draft, setDraft] = useState("")
-  const [inputFocus, setInputFocus] = useState(false)
-  const [buttonHover, setButtonHover] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    inputRef.current?.focus()
-  }, [])
-
-  const canSubmit = draft.trim().length > 0
-  const submit = () => {
-    if (!canSubmit) return
-    onSetName(draft.trim())
-  }
-
-  return (
-    <div style={styles.greetingHero}>
-      <span style={{ ...styles.wave, ...styles.waveLarge }} aria-hidden="true">
-        👋
-      </span>
-      <h1 style={styles.welcomeTitle}>
-        Welcome <span style={styles.welcomeAccent}>aboard</span>
-      </h1>
-      <p style={styles.greetingBody}>
-        Tell us your first name so the candidates you sync get attributed to{" "}you in <em style={styles.greetingEmphasis}>Recruiterflow.</em>
-      </p>
-      <div style={styles.nameSetupRow}>
-        <input
-          ref={inputRef}
-          type="text"
-          placeholder="First name"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && canSubmit) submit()
-          }}
-          onFocus={() => setInputFocus(true)}
-          onBlur={() => setInputFocus(false)}
-          style={{
-            ...styles.nameSetupInput,
-            borderColor: inputFocus ? "#0a66c2" : "#d8dee5",
-            boxShadow: inputFocus ? "0 0 0 3px rgba(10, 102, 194, 0.15)" : "none"
-          }}
-        />
-        <button
-          onClick={submit}
-          disabled={!canSubmit}
-          onMouseEnter={() => setButtonHover(true)}
-          onMouseLeave={() => setButtonHover(false)}
-          style={{
-            ...styles.nameSetupButton,
-            opacity: canSubmit ? 1 : 0.5,
-            cursor: canSubmit ? "pointer" : "not-allowed",
-            backgroundColor:
-              canSubmit && buttonHover ? "#084e9c" : "#0a66c2",
-            transform: canSubmit && buttonHover ? "translateY(-1px)" : "none",
-            boxShadow:
-              canSubmit && buttonHover
-                ? "0 4px 10px rgba(10, 102, 194, 0.25)"
-                : "0 1px 3px rgba(10, 102, 194, 0.18)"
-          }}>
-          Set
-        </button>
-      </div>
-      <p style={styles.greetingHint}>You can change this anytime.</p>
-    </div>
-  )
 }
 
 // --- Status Display ---
@@ -353,23 +191,20 @@ export function StatusDisplay({
   loadStatus: string
   count: number
 }) {
-  const [name, setName] = useStorage<string>(
-    { key: "consultantFirstName", instance: localStore },
-    ""
-  )
-  const trimmedName = (name ?? "").trim()
+  const { user } = useAuth()
+  const trimmedName = user?.displayFirstName ?? "there"
 
   if (state === "not_on_pipeline") {
-    if (!trimmedName) {
-      return <NameSetupGreeting onSetName={setName} />
-    }
     return (
-      <div style={styles.greetingHero}>
-        <span style={styles.wave} aria-hidden="true">👋</span>
-        <EditableNameHeading name={trimmedName} onChange={setName} />
-        <p style={styles.greetingBody}>
+      <div style={welcomeStyles.greetingHero}>
+        <span style={welcomeStyles.wave} aria-hidden="true">👋</span>
+        <h2 style={welcomeStyles.welcomeTitle}>
+          Welcome back,{" "}
+          <span style={welcomeStyles.welcomeAccent}>{trimmedName}</span>
+        </h2>
+        <p style={welcomeStyles.greetingBody}>
           Open a LinkedIn Recruiter project to sync profiles to{" "}
-          <em style={styles.greetingEmphasis}>Recruiterflow</em>.
+          <em style={welcomeStyles.greetingEmphasis}>Recruiterflow</em>.
         </p>
       </div>
     )
@@ -645,48 +480,6 @@ export function ReviewTable({
             })}
           </tbody>
         </table>
-      </div>
-    </div>
-  )
-}
-
-// --- Auth Secret Input ---
-
-export function AuthSecretInput({
-  secret,
-  onSecretChange
-}: {
-  secret: string
-  onSecretChange: (secret: string) => void
-}) {
-  return (
-    <div style={{ width: "100%" }}>
-      <label style={styles.inputLabel}>Extension Secret</label>
-      <div style={{ display: "flex", gap: "6px" }}>
-        <input
-          type="password"
-          value={secret ?? ""}
-          onChange={(e) => onSecretChange(e.target.value)}
-          placeholder="Enter secret..."
-          style={{ ...styles.urlInput, flex: 1 }}
-        />
-        {secret && (
-          <button
-            onClick={() => onSecretChange("")}
-            title="Clear secret"
-            style={{
-              padding: "6px 10px",
-              border: "1px solid #ddd",
-              borderRadius: "6px",
-              backgroundColor: "#fff",
-              cursor: "pointer",
-              fontSize: "12px",
-              color: "#e74c3c",
-              flexShrink: 0
-            }}>
-            Clear
-          </button>
-        )}
       </div>
     </div>
   )
@@ -1108,155 +901,6 @@ export const styles: Record<string, React.CSSProperties> = {
     gap: "20px",
     minHeight: "100vh",
     boxSizing: "border-box"
-  },
-  greetingHero: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    textAlign: "center",
-    gap: "10px",
-    marginTop: "62px",
-    padding: "0 12px",
-    width: "100%",
-    animation: "fade-up 0.35s ease-out"
-  },
-  wave: {
-    fontSize: "40px",
-    display: "inline-block",
-    transformOrigin: "70% 70%",
-    animation: "wave 2.6s ease-in-out infinite",
-    marginBottom: "4px"
-  },
-  waveLarge: {
-    fontSize: "56px"
-  },
-  greetingTitle: {
-    fontSize: "26px",
-    fontWeight: 600,
-    color: "#0d0d0d",
-    margin: "2px 0",
-    lineHeight: 1.25,
-    letterSpacing: "-0.02em",
-    fontFamily:
-      'ui-rounded, "SF Pro Rounded", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif',
-    display: "inline-flex",
-    alignItems: "center",
-    flexWrap: "wrap",
-    justifyContent: "center",
-    gap: "0px"
-  },
-  welcomeTitle: {
-    fontSize: "30px",
-    fontWeight: 700,
-    color: "#0d0d0d",
-    margin: "4px 0 6px 0",
-    lineHeight: 1.2,
-    letterSpacing: "-0.025em",
-    fontFamily:
-      'ui-rounded, "SF Pro Rounded", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif'
-  },
-  welcomeAccent: {
-    background: "linear-gradient(135deg, #0a66c2 0%, #2d8eff 100%)",
-    WebkitBackgroundClip: "text",
-    WebkitTextFillColor: "transparent",
-    backgroundClip: "text",
-    fontWeight: 800
-  },
-  greetingBody: {
-    fontSize: "13.5px",
-    color: "#0e0d0d",
-    lineHeight: 1.55,
-    margin: "2px 0 0 0",
-    maxWidth: "280px"
-  },
-  greetingSubtle: {
-    fontSize: "14px",
-    color: "#1b1b1b",
-    lineHeight: 1.55,
-    margin: 0,
-    maxWidth: "260px",
-    fontStyle: "italic"
-  },
-  greetingEmphasis: {
-    color: "#0d82f7",
-    fontStyle: "normal",
-    fontWeight: 600
-  },
-  greetingHint: {
-    fontSize: "14px",
-    color: "#2e2f30",
-    margin: "14px 0 0 0",
-    letterSpacing: "0.01em"
-  },
-  greetingName: {
-    display: "inline-block",
-    cursor: "pointer",
-    color: "#0d0d0d",
-    fontWeight: 800,
-    padding: "1px 8px",
-    margin: "0 1px",
-    borderRadius: "8px",
-    transition: "background-color 0.15s ease"
-  },
-  greetingNameInput: {
-    fontSize: "26px",
-    fontWeight: 800,
-    color: "#0d0d0d",
-    border: "none",
-    borderBottom: "2px solid #9bb6dc",
-    background: "transparent",
-    outline: "none",
-    width: "120px",
-    padding: "1px 4px",
-    margin: "0 1px",
-    fontFamily: "inherit",
-    textAlign: "center",
-    letterSpacing: "-0.02em",
-    transition: "border-bottom-color 0.15s ease"
-  },
-  greetingEditIcon: {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    width: "26px",
-    height: "26px",
-    marginLeft: "8px",
-    color: "#0a66c2",
-    cursor: "pointer",
-    borderRadius: "50%",
-    transition: "opacity 0.18s ease, transform 0.18s ease, background-color 0.15s",
-    backgroundColor: "rgba(10, 102, 194, 0.10)"
-  },
-  nameSetupRow: {
-    display: "flex",
-    gap: "8px",
-    marginTop: "16px",
-    width: "100%",
-    maxWidth: "300px"
-  },
-  nameSetupInput: {
-    flex: 1,
-    padding: "11px 16px",
-    fontSize: "14px",
-    border: "1px solid #d8dee5",
-    borderRadius: "10px",
-    outline: "none",
-    textAlign: "left",
-    fontFamily: "inherit",
-    boxSizing: "border-box",
-    color: "#1a1a1a",
-    transition: "border-color 0.15s ease, box-shadow 0.15s ease"
-  },
-  nameSetupButton: {
-    padding: "11px 22px",
-    backgroundColor: "#0a66c2",
-    color: "#fff",
-    border: "none",
-    borderRadius: "10px",
-    fontSize: "14px",
-    fontWeight: 600,
-    letterSpacing: "0.01em",
-    transition: "background-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease"
   },
   statusCentered: {
     display: "flex",

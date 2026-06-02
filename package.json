@@ -6,13 +6,14 @@
   "author": "Joel Haines",
   "scripts": {
     "dev": "plasmo dev",
-    "prebuild": "dotenv -e .env.production -- node -e \"if(!process.env.PLASMO_PUBLIC_MIDDLEWARE_URL){console.error('ERROR: PLASMO_PUBLIC_MIDDLEWARE_URL is unset. Create .env.production with the worker URL.');process.exit(1)}if(!process.env.PLASMO_PUBLIC_MUSIC_URL){console.error('ERROR: PLASMO_PUBLIC_MUSIC_URL is unset. Create .env.production with the music worker URL.');process.exit(1)}\"",
+    "prebuild": "dotenv -e .env.production -- node -e \"const required=['PLASMO_PUBLIC_MIDDLEWARE_URL','PLASMO_PUBLIC_MUSIC_URL','PLASMO_PUBLIC_ACCESS_TEAM_DOMAIN','PLASMO_PUBLIC_ACCESS_CLIENT_ID'];const missing=required.filter(k=>!process.env[k]);if(missing.length){console.error('ERROR: Missing required env vars in .env.production:',missing.join(', '));process.exit(1)}if(process.env.PLASMO_PUBLIC_ACCESS_TEAM_DOMAIN.endsWith('/')){console.error('ERROR: PLASMO_PUBLIC_ACCESS_TEAM_DOMAIN must not have a trailing slash.');process.exit(1)}\"",
     "build": "plasmo build",
     "package": "plasmo package"
   },
   "dependencies": {
     "@plasmohq/messaging": "^0.7.2",
     "@plasmohq/storage": "^1.15.0",
+    "oauth4webapi": "^3.8.6",
     "papaparse": "^5.5.3",
     "plasmo": "0.90.5",
     "react": "^18.3.1",
@@ -29,18 +30,21 @@
     "typescript": "^5.7.2"
   },
   "manifest": {
+    "key": "$CRX_PUBLIC_KEY",
     "permissions": [
       "sidePanel",
       "storage",
-      "webNavigation"
+      "webNavigation",
+      "identity"
     ],
     "host_permissions": [
       "https://www.linkedin.com/talent/*",
       "$PLASMO_PUBLIC_MIDDLEWARE_URL/*",
-      "$PLASMO_PUBLIC_MUSIC_URL/*"
+      "$PLASMO_PUBLIC_MUSIC_URL/*",
+      "$PLASMO_PUBLIC_ACCESS_TEAM_DOMAIN/*"
     ],
     "content_security_policy": {
-      "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: https://*.dzcdn.net; connect-src 'self' $PLASMO_PUBLIC_MIDDLEWARE_URL $PLASMO_PUBLIC_MUSIC_URL wss:"
+      "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: https://*.dzcdn.net; connect-src 'self' $PLASMO_PUBLIC_MIDDLEWARE_URL $PLASMO_PUBLIC_MUSIC_URL $PLASMO_PUBLIC_ACCESS_TEAM_DOMAIN wss:"
     }
   }
 }
