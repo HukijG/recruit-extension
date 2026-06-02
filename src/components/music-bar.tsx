@@ -374,11 +374,19 @@ if (
       display: flex;
       flex-direction: column;
     }
+    /* Locked to a SQUARE: height drives the size (flex:1 fills the available
+       vertical space as before), width follows from aspect-ratio so the art
+       never stretches. max-width:100% keeps it inside a narrow sheet; the auto
+       inline margins centre it so any extra width becomes left/right
+       whitespace rather than a distorted image. */
     .lr-music-np-art-frame {
       position: relative;
       flex: 1 1 0;
       min-height: 0;
-      width: 100%;
+      aspect-ratio: 1 / 1;
+      width: auto;
+      max-width: 100%;
+      margin-inline: auto;
       border-radius: 14px;
       overflow: hidden;
       background-color: #eef0f2;
