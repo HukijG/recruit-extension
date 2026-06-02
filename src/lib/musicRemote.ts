@@ -1,9 +1,6 @@
 import { sendToBackground } from "@plasmohq/messaging"
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import { useStorage } from "@plasmohq/storage/hook"
-
-import { localStore } from "~lib/constants"
 import type {
   MusicWsStatus,
   NowPlayingSnapshot,
@@ -20,14 +17,15 @@ import type {
 //
 // WS AUTH — TICKET FLOW (header-free):
 //   A browser WebSocket can't set request headers, so the WS can't carry the
-//   normal X-Extension-Token. Instead we mint a single-use ticket over the
-//   authed HTTP path: each connect first calls the musicWsTicket background
-//   handler (which POSTs /music/ws-ticket with the extension secret), then
-//   opens the WS with subprotocols ['rf-music.v1', 'ticket.' + ticket]. The
-//   worker redeems the ticket from the Sec-WebSocket-Protocol header before
-//   accepting the upgrade and echoes back 'rf-music.v1'. A failed ticket fetch
-//   is treated exactly like a dropped connection — we never open a WS without a
-//   ticket — and rides the same backoff/reconnect path below.
+//   Authorization bearer the /music/* routes use. Instead we mint a single-use
+//   ticket over the authed HTTP path: each connect first calls the musicWsTicket
+//   background handler (which POSTs /music/ws-ticket via authFetch, attaching
+//   the Cloudflare Access OAuth token), then opens the WS with subprotocols
+//   ['rf-music.v1', 'ticket.' + ticket]. The worker redeems the ticket from the
+//   Sec-WebSocket-Protocol header before accepting the upgrade and echoes back
+//   'rf-music.v1'. A failed ticket fetch is treated exactly like a dropped
+//   connection — we never open a WS without a ticket — and rides the same
+//   backoff/reconnect path below.
 //
 // CONNECT GATING (demand-gate):
 //   The socket opens whenever the side panel is OPEN, on every surface except
@@ -179,20 +177,6 @@ export function useMusicRemote(enabled: boolean): UseMusicRemoteReturn {
   // the latest connect through this ref, kept current by an effect below.
   const connectRef = useRef<() => void>(() => {})
 
-  // The extension secret authenticates the ws-ticket mint (the WS itself can't
-  // carry a header). Mirrored through a ref so the recursive reconnect closures
-  // always read the freshest value without re-subscribing the WS lifecycle to
-  // it — a secret change shouldn't tear down a live socket, only the next
-  // ticket fetch needs to see it.
-  const [extensionSecret] = useStorage<string>(
-    { key: "extensionSecret", instance: localStore },
-    ""
-  )
-  const secretRef = useRef(extensionSecret)
-  useEffect(() => {
-    secretRef.current = extensionSecret
-  }, [extensionSecret])
-
   const clearReconnect = useCallback(() => {
     if (reconnectRef.current) {
       clearTimeout(reconnectRef.current)
@@ -291,15 +275,14 @@ export function useMusicRemote(enabled: boolean): UseMusicRemoteReturn {
     setStatus("connecting")
 
     // Mint a single-use ticket over the authed HTTP path, THEN open the WS with
-    // it as a subprotocol — a browser WS can't send the X-Extension-Token
-    // header. A failed ticket fetch is a connection failure: route it through
-    // the same backoff/reconnect path and never open a header-less WS.
+    // it as a subprotocol — a browser WS can't send the Authorization bearer.
+    // A failed ticket fetch is a connection failure: route it through the same
+    // backoff/reconnect path and never open a header-less WS.
     void (async () => {
       let ticket: string
       try {
         const resp = await sendToBackground<unknown, WsTicketResp>({
-          name: "musicWsTicket",
-          body: { secret: secretRef.current }
+          name: "musicWsTicket"
         })
         if (!resp?.ok || !resp.ticket) {
           if (activeRef.current) scheduleReconnect()

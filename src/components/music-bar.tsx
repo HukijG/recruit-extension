@@ -1,9 +1,6 @@
 import { sendToBackground } from "@plasmohq/messaging"
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react"
 
-import { useStorage } from "@plasmohq/storage/hook"
-
-import { localStore } from "~lib/constants"
 import { MusicRemoteContext } from "~lib/contexts"
 import { useInterpolatedPosition } from "~lib/musicRemote"
 import type {
@@ -894,10 +891,6 @@ function MusicSheet({
   onControl: (name: ControlName, body?: Record<string, unknown>) => void
   onClose: () => void
 }) {
-  const [extensionSecret] = useStorage<string>(
-    { key: "extensionSecret", instance: localStore },
-    ""
-  )
   const [tab, setTab] = useState<SearchTab>("songs")
   const [query, setQuery] = useState("")
   // Tracks input focus so the search overlay shows while the field is focused.
@@ -950,7 +943,7 @@ function MusicSheet({
     if (tab === "songs") {
       const resp = await sendToBackground<unknown, SongSearchResp>({
         name: "musicSearch",
-        body: { query: q, secret: extensionSecret }
+        body: { query: q }
       }).catch(
         (err): SongSearchResp => ({
           ok: false,
@@ -965,7 +958,7 @@ function MusicSheet({
     } else {
       const resp = await sendToBackground<unknown, PlaylistSearchResp>({
         name: "musicPlaylistSearch",
-        body: { query: q, secret: extensionSecret }
+        body: { query: q }
       }).catch(
         (err): PlaylistSearchResp => ({
           ok: false,
@@ -986,7 +979,7 @@ function MusicSheet({
     setError(null)
     const resp = await sendToBackground<unknown, PlaylistContentsResp>({
       name: "musicPlaylistContents",
-      body: { id: playlist.id, secret: extensionSecret }
+      body: { id: playlist.id }
     }).catch(
       (err): PlaylistContentsResp => ({
         ok: false,
@@ -1006,19 +999,19 @@ function MusicSheet({
   const enqueueSong = (song: MusicSongResult) => {
     void sendToBackground<unknown, ActionResp>({
       name: "musicEnqueue",
-      body: { id: song.id, secret: extensionSecret }
+      body: { id: song.id }
     }).catch(() => {})
   }
   const playSong = (song: MusicSongResult) => {
     void sendToBackground<unknown, ActionResp>({
       name: "musicPlay",
-      body: { id: song.id, secret: extensionSecret }
+      body: { id: song.id }
     }).catch(() => {})
   }
   const playPlaylist = (playlist: MusicPlaylistResult) => {
     void sendToBackground<unknown, ActionResp>({
       name: "musicPlaylistPlay",
-      body: { id: playlist.id, secret: extensionSecret }
+      body: { id: playlist.id }
     }).catch(() => {})
   }
 
@@ -1351,10 +1344,6 @@ type ControlResp = { ok: boolean; error?: string }
 
 export function MusicBar() {
   const slot = useContext(MusicRemoteContext)
-  const [extensionSecret] = useStorage<string>(
-    { key: "extensionSecret", instance: localStore },
-    ""
-  )
   // The expanded sheet's open/closed state is the bar's OWN source of truth —
   // decoupled from `suppressed` so a side-panel blur (which flips suppression)
   // can never tear down a mid-input search. It only closes via the sheet's
@@ -1422,7 +1411,7 @@ export function MusicBar() {
   const sendControl = (name: ControlName, body?: Record<string, unknown>) => {
     void sendToBackground<unknown, ControlResp>({
       name,
-      body: { ...body, secret: extensionSecret }
+      body: { ...body }
     }).catch(() => {})
   }
 

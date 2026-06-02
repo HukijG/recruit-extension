@@ -1,17 +1,20 @@
 import type { PlasmoMessaging } from "@plasmohq/messaging"
 
+import { authFetch, NotAuthenticatedError } from "~background/auth-runtime"
+
 const MUSIC_URL = process.env.PLASMO_PUBLIC_MUSIC_URL
 const ROUTE_PATH = "/music/ws-ticket"
 
 // Mint a single-use ticket for the now-playing WebSocket handshake. A browser
-// WebSocket can't set request headers, so the WS can't carry the normal
-// X-Extension-Token. Instead the bar calls this handler over the authed HTTP
-// path (same secret/header as the other /music/* control routes) to mint a
-// short-lived ticket, then opens the WS with `ticket.<id>` as a subprotocol;
-// the worker redeems it from Sec-WebSocket-Protocol before accepting the
-// upgrade. Returns { ok: true, ticket } on success; any failure is reported as
-// an error envelope so the hook can treat it like a dropped connection.
-const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
+// WebSocket can't set request headers, so the WS can't carry the Authorization
+// bearer the other /music/* routes use. Instead the bar calls this handler over
+// the authed HTTP path (authFetch attaches the Cloudflare Access OAuth token) to
+// mint a short-lived ticket, then opens the WS with `ticket.<id>` as a
+// subprotocol; the worker redeems it from Sec-WebSocket-Protocol before
+// accepting the upgrade. Returns { ok: true, ticket } on success; any failure is
+// reported as an error envelope so the hook can treat it like a dropped
+// connection.
+const handler: PlasmoMessaging.MessageHandler = async (_req, res) => {
   if (!MUSIC_URL) {
     res.send({
       ok: false,
@@ -21,14 +24,10 @@ const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
     return
   }
 
-  const { secret } = req.body ?? {}
-
   const url = `${MUSIC_URL.replace(/\/+$/, "")}${ROUTE_PATH}`
-  const headers: Record<string, string> = { "Content-Type": "application/json" }
-  if (secret) headers["X-Extension-Token"] = secret
 
   try {
-    const resp = await fetch(url, { method: "POST", headers })
+    const resp = await authFetch(url, { method: "POST" })
     if (!resp.ok) {
       res.send({ ok: false, error: `${resp.status} ${resp.statusText}` })
       return
@@ -41,6 +40,10 @@ const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
     }
     res.send({ ok: true, ticket })
   } catch (err) {
+    if (err instanceof NotAuthenticatedError) {
+      res.send({ ok: false, error: "not_authenticated" })
+      return
+    }
     res.send({
       ok: false,
       error: err instanceof Error ? err.message : "Network error"

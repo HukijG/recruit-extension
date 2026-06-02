@@ -1,5 +1,6 @@
 import type { PlasmoMessaging } from "@plasmohq/messaging"
 
+import { authFetch, NotAuthenticatedError } from "~background/auth-runtime"
 import { coerceTrackId } from "~lib/musicParse"
 
 const MUSIC_URL = process.env.PLASMO_PUBLIC_MUSIC_URL
@@ -21,7 +22,6 @@ const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
   }
 
   const id = coerceTrackId((req.body ?? {}).id)
-  const { secret } = req.body ?? {}
 
   if (id === null) {
     res.send({ ok: false, error: "Missing or invalid playlist id" })
@@ -29,13 +29,10 @@ const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
   }
 
   const url = `${MUSIC_URL.replace(/\/+$/, "")}${ROUTE_PATH}`
-  const headers: Record<string, string> = { "Content-Type": "application/json" }
-  if (secret) headers["X-Extension-Token"] = secret
 
   try {
-    const resp = await fetch(url, {
+    const resp = await authFetch(url, {
       method: "POST",
-      headers,
       body: JSON.stringify({ id })
     })
     if (!resp.ok) {
@@ -44,6 +41,10 @@ const handler: PlasmoMessaging.MessageHandler = async (req, res) => {
     }
     res.send({ ok: true })
   } catch (err) {
+    if (err instanceof NotAuthenticatedError) {
+      res.send({ ok: false, error: "not_authenticated" })
+      return
+    }
     res.send({
       ok: false,
       error: err instanceof Error ? err.message : "Network error"
