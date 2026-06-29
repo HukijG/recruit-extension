@@ -83,9 +83,10 @@ export function outcomeDotColor(tone: OutcomeTone): string {
 export function outcomeTextColor(tone: OutcomeTone): string {
   if (tone === "positive") return "#157040"
   if (tone === "negative") return "#a82a20"
-  // Muted grey — one notch lighter than neutral (#3c4043) so cancelled reads
-  // as subordinate to voicemail/connected.
-  if (tone === "cancelled") return "#5f6368"
+  // Cancelled shares the neutral body grey (#3c4043) for legibility — #5f6368
+  // read as washed-out next to voicemail. The hollow-ring dot + "Cancelled"
+  // label carry the distinction, not the text shade.
+  if (tone === "cancelled") return "#3c4043"
   return "#3c4043"
 }
 

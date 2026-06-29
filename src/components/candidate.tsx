@@ -473,6 +473,8 @@ function CandidateJobBox({ job }: { job: CandidateJob | null }) {
 }
 
 function CandidateColdCallList({ activities }: { activities: CandidateActivity[] }) {
+  // Kept ascending (oldest first) so "Cold call N" numbering is stable and
+  // chronological; the list is rendered newest-first via displayCalls below.
   const coldCalls = useMemo(() => {
     return activities
       .filter((a) => a.type === COLD_CALL_TYPE)
@@ -480,14 +482,21 @@ function CandidateColdCallList({ activities }: { activities: CandidateActivity[]
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
   }, [activities])
 
+  // Number chronologically (oldest = "Cold call 1") but show newest first, so
+  // the most recent call sits at the top with the highest ordinal.
+  const displayCalls = useMemo(
+    () => coldCalls.map((call, i) => ({ call, ordinal: i + 1 })).reverse(),
+    [coldCalls]
+  )
+
   const [expanded, setExpanded] = useState<Set<string | number>>(new Set())
   const [sectionExpanded, setSectionExpanded] = useState(false)
 
-  // Split the total into {voicemail, connected, null/legacy} ("reached") vs
+  // Split the total into {voicemail, connected, null/legacy} ("completed") vs
   // {cancelled} — calls that rang but never connected. Cancelled rows only
-  // arrive for the call owner, so the split is hidden when cancelledCount is 0
-  // (data-gated below, not an identity check) — "N reached · 0 cancelled" would
-  // just restate the heading total for every other consultant.
+  // arrive for the call owner, so the breakdown is hidden when cancelledCount
+  // is 0 (data-gated below, not an identity check) — "N completed · 0 cancelled"
+  // would just restate the heading total for every other consultant.
   const { reachedCount, cancelledCount } = useMemo(() => {
     let cancelled = 0
     for (const c of coldCalls) {
@@ -540,17 +549,15 @@ function CandidateColdCallList({ activities }: { activities: CandidateActivity[]
         <span style={candidateStyles.coldCallSectionHeading}>
           Cold calls ({coldCalls.length})
         </span>
-      </button>
-      {cancelledCount > 0 && (
-        <div style={candidateStyles.coldCallSectionSplit}>
-          <span>{reachedCount} reached</span>
-          <span style={candidateStyles.coldCallSplitSep} aria-hidden="true">·</span>
-          <span style={{ color: outcomeTextColor("cancelled") }}>
-            {cancelledCount} cancelled
+        {cancelledCount > 0 && (
+          <span style={candidateStyles.coldCallSectionBreakdown}>
+            <span>{reachedCount} completed</span>
+            <span style={candidateStyles.coldCallSplitSep} aria-hidden="true">·</span>
+            <span>{cancelledCount} cancelled</span>
           </span>
-        </div>
-      )}
-      {sectionExpanded && coldCalls.map((c, i) => {
+        )}
+      </button>
+      {sectionExpanded && displayCalls.map(({ call: c, ordinal }) => {
         const date = formatActivityDate(c.createdAt)
         const outcome = formatOutcome(c.outcome)
         const hasNotes = c.description.trim().length > 0
@@ -587,7 +594,7 @@ function CandidateColdCallList({ activities }: { activities: CandidateActivity[]
                   </svg>
                 )}
               </span>
-              <span style={candidateStyles.coldCallLabel}>Cold call {i + 1}</span>
+              <span style={candidateStyles.coldCallLabel}>Cold call {ordinal}</span>
               <span style={candidateStyles.coldCallDate}>{date}</span>
             </div>
             {outcome && (
@@ -845,33 +852,50 @@ const candidateStyles: Record<string, React.CSSProperties> = {
     width: "100%",
     display: "flex",
     alignItems: "center",
-    gap: "8px",
+    // Wrap so a narrow panel drops the breakdown to its own (right-aligned)
+    // line instead of fracturing the heading text mid-word. Column gap 8px
+    // between chevron/heading; tighter 3px row gap when it wraps to two lines.
+    flexWrap: "wrap",
+    columnGap: "8px",
+    rowGap: "3px",
     cursor: "pointer",
     textAlign: "left",
     color: "#15171a"
   },
   coldCallSectionHeading: {
     margin: 0,
-    flex: 1,
+    // Don't grow (let the breakdown's margin-left:auto own the slack) and never
+    // wrap the heading itself — it stays one line; the breakdown wraps instead.
+    flex: "0 1 auto",
     minWidth: 0,
+    whiteSpace: "nowrap",
     fontSize: "13px",
     fontWeight: 700,
     color: "#15171a",
     textTransform: "uppercase",
     letterSpacing: "0.6px"
   },
-  coldCallSectionSplit: {
-    // Aligned under the heading text (12px icon column + 8px gap in the toggle).
-    paddingLeft: "20px",
-    display: "flex",
+  coldCallSectionBreakdown: {
+    // Right-aligned meta on the heading row. margin-left:auto eats the slack so
+    // it parks at the far edge (reads as a separate zone, not run-on text); when
+    // the row wraps it stays whole and right-aligns on its own line. Uniform
+    // colour — distinction is the words, not subtle grey-on-grey shades.
+    marginLeft: "auto",
+    flexShrink: 0,
+    display: "inline-flex",
     alignItems: "baseline",
     gap: "6px",
     fontSize: "13px",
     fontWeight: 600,
-    color: "#3c4043"
+    color: "#2e3133",
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "normal",
+    textTransform: "none",
+    whiteSpace: "nowrap"
   },
   coldCallSplitSep: {
-    color: "#9aa0a6"
+    color: "#9aa0a6",
+    fontWeight: 400
   },
   coldCallEmpty: {
     margin: 0,
