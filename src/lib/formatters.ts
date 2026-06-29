@@ -54,6 +54,9 @@ export function formatOutcome(
     connected: { label: "Connected", tone: "positive" },
     interested: { label: "Interested", tone: "positive" },
     voicemail: { label: "Voicemail", tone: "neutral" },
+    // Outbound call that rang but never connected (no voicemail, no
+    // conversation). Distinct from voicemail — see outcomeDotColor/Text.
+    cancelled: { label: "Cancelled", tone: "cancelled" },
     no_answer: { label: "No answer", tone: "neutral" },
     callback: { label: "Callback requested", tone: "neutral" },
     busy: { label: "Busy", tone: "neutral" },
@@ -71,12 +74,18 @@ export function formatOutcome(
 export function outcomeDotColor(tone: OutcomeTone): string {
   if (tone === "positive") return "#1f9d55"
   if (tone === "negative") return "#d23a2c"
+  // Cancelled reuses the neutral grey, but the dot is rendered as a hollow
+  // ring (this is the ring stroke colour) to read as "nothing connected".
+  if (tone === "cancelled") return "#9aa0a6"
   return "#9aa0a6"
 }
 
 export function outcomeTextColor(tone: OutcomeTone): string {
   if (tone === "positive") return "#157040"
   if (tone === "negative") return "#a82a20"
+  // Muted grey — one notch lighter than neutral (#3c4043) so cancelled reads
+  // as subordinate to voicemail/connected.
+  if (tone === "cancelled") return "#5f6368"
   return "#3c4043"
 }
 

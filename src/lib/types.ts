@@ -217,7 +217,7 @@ export type CallStreamSlot = {
 
 // --- Outcome / cold call ---
 
-export type OutcomeTone = "positive" | "neutral" | "negative"
+export type OutcomeTone = "positive" | "neutral" | "negative" | "cancelled"
 
 // --- SMS templates ---
 

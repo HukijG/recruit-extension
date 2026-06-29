@@ -49,6 +49,15 @@ const TEST_CANDIDATE_DETAILS: CandidateDetails = {
       description: "",
       createdAt: "2026-04-29T09:15:00Z",
       outcome: "connected"
+    },
+    {
+      // Rang but never connected — no description, renders as a single line.
+      id: "missed:test-cc-3",
+      type: COLD_CALL_TYPE,
+      name: "Cold call 3",
+      description: "",
+      createdAt: "2026-05-02T16:40:00Z",
+      outcome: "cancelled"
     }
   ]
 }

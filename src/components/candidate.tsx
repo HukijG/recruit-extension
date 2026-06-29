@@ -26,7 +26,6 @@ import type {
   CandidateJob,
   CandidateState,
   MarkInvalidState,
-  OutcomeTone,
   UserContextState
 } from "~lib/types"
 
@@ -484,17 +483,17 @@ function CandidateColdCallList({ activities }: { activities: CandidateActivity[]
   const [expanded, setExpanded] = useState<Set<string | number>>(new Set())
   const [sectionExpanded, setSectionExpanded] = useState(false)
 
-  const sectionTone: OutcomeTone | null = useMemo(() => {
-    let hasPositive = false
-    let hasNegative = false
+  // Split the total into {voicemail, connected, null/legacy} ("reached") vs
+  // {cancelled} — calls that rang but never connected. Cancelled rows only
+  // arrive for the call owner, so the split is hidden when cancelledCount is 0
+  // (data-gated below, not an identity check) — "N reached · 0 cancelled" would
+  // just restate the heading total for every other consultant.
+  const { reachedCount, cancelledCount } = useMemo(() => {
+    let cancelled = 0
     for (const c of coldCalls) {
-      const tone = formatOutcome(c.outcome)?.tone
-      if (tone === "positive") hasPositive = true
-      else if (tone === "negative") hasNegative = true
+      if (formatOutcome(c.outcome)?.tone === "cancelled") cancelled++
     }
-    if (hasPositive) return "positive"
-    if (hasNegative) return "negative"
-    return null
+    return { reachedCount: coldCalls.length - cancelled, cancelledCount: cancelled }
   }, [coldCalls])
 
   const toggle = (id: string | number) => {
@@ -541,16 +540,16 @@ function CandidateColdCallList({ activities }: { activities: CandidateActivity[]
         <span style={candidateStyles.coldCallSectionHeading}>
           Cold calls ({coldCalls.length})
         </span>
-        {sectionTone && (
-          <span
-            style={{
-              ...candidateStyles.coldCallSectionTone,
-              color: outcomeTextColor(sectionTone)
-            }}>
-            Connected
-          </span>
-        )}
       </button>
+      {cancelledCount > 0 && (
+        <div style={candidateStyles.coldCallSectionSplit}>
+          <span>{reachedCount} reached</span>
+          <span style={candidateStyles.coldCallSplitSep} aria-hidden="true">·</span>
+          <span style={{ color: outcomeTextColor("cancelled") }}>
+            {cancelledCount} cancelled
+          </span>
+        </div>
+      )}
       {sectionExpanded && coldCalls.map((c, i) => {
         const date = formatActivityDate(c.createdAt)
         const outcome = formatOutcome(c.outcome)
@@ -597,7 +596,13 @@ function CandidateColdCallList({ activities }: { activities: CandidateActivity[]
                   <span
                     style={{
                       ...candidateStyles.coldCallOutcomeDot,
-                      backgroundColor: outcomeDotColor(outcome.tone)
+                      // Cancelled = hollow ring (inset shadow keeps the 7px box
+                      // exact); real outcomes = filled dot.
+                      ...(outcome.tone === "cancelled"
+                        ? {
+                            boxShadow: `inset 0 0 0 1.5px ${outcomeDotColor(outcome.tone)}`
+                          }
+                        : { backgroundColor: outcomeDotColor(outcome.tone) })
                     }}
                   />
                 </span>
@@ -855,10 +860,18 @@ const candidateStyles: Record<string, React.CSSProperties> = {
     textTransform: "uppercase",
     letterSpacing: "0.6px"
   },
-  coldCallSectionTone: {
+  coldCallSectionSplit: {
+    // Aligned under the heading text (12px icon column + 8px gap in the toggle).
+    paddingLeft: "20px",
+    display: "flex",
+    alignItems: "baseline",
+    gap: "6px",
     fontSize: "13px",
     fontWeight: 600,
-    flexShrink: 0
+    color: "#3c4043"
+  },
+  coldCallSplitSep: {
+    color: "#9aa0a6"
   },
   coldCallEmpty: {
     margin: 0,
