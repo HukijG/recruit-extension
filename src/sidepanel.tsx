@@ -34,6 +34,7 @@ import { TestCallView } from "~components/test-call"
 import { TextPopover } from "~components/text-popover"
 import { useCallStats } from "~lib/callStats"
 import { useCallStream } from "~lib/callStream"
+import { useCommandHotkeys } from "~lib/hotkeys"
 import { useMusicRemote } from "~lib/musicRemote"
 import { UNDO_DELAY_MS } from "~lib/constants"
 import { useTemplateHydration } from "~lib/useTemplateHydration"
@@ -312,6 +313,9 @@ function SidePanelInner() {
   // the underlying chrome.runtime listener install isn't churned per render.
   const handleNeedsReconnect = useCallback(() => {}, [])
   useNeedsReconnectListener(handleNeedsReconnect)
+
+  // Keyboard shortcuts (Ctrl+Shift+8 / +9) relayed from the background worker.
+  useCommandHotkeys()
 
   const [workflowState, setWorkflowState] =
     useState<WorkflowState>("not_on_pipeline")

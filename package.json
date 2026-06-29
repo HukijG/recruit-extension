@@ -45,6 +45,16 @@
     ],
     "content_security_policy": {
       "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: https://*.dzcdn.net; connect-src 'self' $PLASMO_PUBLIC_MIDDLEWARE_URL $PLASMO_PUBLIC_MUSIC_URL $PLASMO_PUBLIC_ACCESS_TEAM_DOMAIN wss:"
+    },
+    "commands": {
+      "toggle-call": {
+        "suggested_key": { "default": "Ctrl+Shift+8" },
+        "description": "Toggle call / hangup"
+      },
+      "speak-name": {
+        "suggested_key": { "default": "Ctrl+Shift+9" },
+        "description": "Speak candidate first name"
+      }
     }
   }
 }

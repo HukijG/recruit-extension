@@ -144,4 +144,15 @@ chrome.tabs.onActivated.addListener(() => {
   checkActiveTabAndBroadcast()
 })
 
+// --- Keyboard command relay ---
+//
+// chrome.commands fire here in the worker, but their actions (click the call
+// button, speak the candidate name) live in the side-panel DOM, which the
+// worker can't touch. Relay each command verbatim as a { type } message; the
+// panel listens via useCommandHotkeys. Harmless if the panel is closed —
+// sendMessage just rejects with no receiver.
+chrome.commands.onCommand.addListener((command) => {
+  chrome.runtime.sendMessage({ type: command }).catch(() => {})
+})
+
 export {}
